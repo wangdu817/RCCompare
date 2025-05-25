@@ -15,24 +15,37 @@ from matplotlib.figure import Figure
 try:
     from chemkin_parser import parse_chemkin_mechanism
     from rate_calculator import (
-        calculate_arrhenius_rate,
-        calculate_plog_rate,
-        calculate_troe_rate,
-        get_third_body_concentration,
-        R_cal 
+        calculate_arrhenius_rate, calculate_plog_rate, calculate_troe_rate,
+        get_third_body_concentration, R_cal,
+        # For reverse rates
+        get_reaction_thermo_properties, calculate_equilibrium_constant_kp,
+        calculate_delta_n_gas, calculate_equilibrium_constant_kc,
+        calculate_reverse_rate_constant
     )
+    from thermo_parser import read_nasa_polynomials, append_nasa_polynomial_from_string, is_valid_nasa_polynomial_string
+
 except ImportError as e:
-    print(f"Error importing modules: {e}. Ensure chemkin_parser.py and rate_calculator.py are accessible.")
+    print(f"Error importing modules: {e}. Ensure chemkin_parser.py, rate_calculator.py, and thermo_parser.py are accessible.")
+    # Set all potentially missing functions/modules to None
     parse_chemkin_mechanism = None
+    read_nasa_polynomials = None
+    append_nasa_polynomial_from_string = None
+    is_valid_nasa_polynomial_string = None
     calculate_arrhenius_rate = None
     calculate_plog_rate = None
     calculate_troe_rate = None
     get_third_body_concentration = None
+    get_reaction_thermo_properties = None
+    calculate_equilibrium_constant_kp = None
+    calculate_delta_n_gas = None
+    calculate_equilibrium_constant_kc = None
+    calculate_reverse_rate_constant = None
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.thermo_filepath = "therm.dat" # Define path to thermo file, store as instance var
 
         self.setWindowTitle("CHEMKIN Rate Viewer (PyQt)")
         self.setGeometry(100, 100, 1200, 800)
@@ -116,12 +129,27 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
 
         self.rate_table_widget = QTableWidget()
         self.rate_table_widget.setObjectName("rate_table_widget")
-        self.rate_table_widget.setColumnCount(5)
-        self.rate_table_widget.setHorizontalHeaderLabels(["Reaction", "k @ 500K", "k @ 1000K", "k @ 1500K", "k @ 2000K"])
-        self.rate_table_widget.horizontalHeader().setStretchLastSection(True)
-        self.rate_table_widget.setAlternatingRowColors(True)
+        
+        self.table_temperatures = [500.0, 1000.0, 1500.0, 2000.0] # Store for reuse
+        num_temp_points = len(self.table_temperatures)
+        # Reaction | Calc Rev? | kf | kr | Kc | Kp (for each T)
+        self.rate_table_widget.setColumnCount(1 + 1 + (4 * num_temp_points)) 
+        
+        header_labels = ["Reaction", "Calc Rev?"]
+        for T_table in self.table_temperatures:
+            header_labels.extend([
+                f"kf @ {T_table:.0f}K", 
+                f"kr @ {T_table:.0f}K", 
+                f"Kc @ {T_table:.0f}K", 
+                f"Kp @ {T_table:.0f}K"
+            ])
+        self.rate_table_widget.setHorizontalHeaderLabels(header_labels)
+        
+        self.rate_table_widget.horizontalHeader().setStretchLastSection(False) # Allow scrolling for many columns
+        self.rate_table_widget.setAlternatingRowColors(True) # Keep this
         self.rate_table_widget.setMinimumHeight(150)
-        self.rate_table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # self.rate_table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive) # Will be handled by new method
+        self._setup_rate_table_widget_appearance() # Call the new method
 
         self.right_panel_splitter.addWidget(self.rate_table_widget)
         self.right_panel_splitter.setSizes([400, 200])
@@ -131,7 +159,56 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
 
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
+        
+        self.thermo_data = None
+        self._load_thermo_data() # Load thermo data on startup
+
         self.statusBar.showMessage("Ready")
+
+    def _setup_rate_table_widget_appearance(self):
+        header = self.rate_table_widget.horizontalHeader()
+        
+        # Column 0: Reaction string
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) 
+        # Or Interactive, but Stretch often good for the main descriptive column
+        # self.rate_table_widget.setColumnWidth(0, 300) # Example if using Interactive
+
+        # Column 1: "Calc Rev?" Checkbox
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        # self.rate_table_widget.setColumnWidth(1, 80) # Or a fixed small width if ResizeToContents isn't perfect
+
+        # kf, kr, Kc, Kp columns (indices 2 to 1 + 1 + (4 * num_temp_points) - 1)
+        # These are columns 2, 3, 4, 5 (for T1), 6, 7, 8, 9 (for T2) etc.
+        num_temp_points = len(self.table_temperatures)
+        for i in range(num_temp_points * 4):
+            col_index = 2 + i
+            header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+            self.rate_table_widget.setColumnWidth(col_index, 90) # Default width for rate constant columns
+
+        self.rate_table_widget.setAlternatingRowColors(True) # Already set, but ensure it's here
+        self.rate_table_widget.verticalHeader().setVisible(False) # Optional: Hide row numbers
+
+    def _load_thermo_data(self):
+        # self.thermo_filepath is defined in __init__
+        if read_nasa_polynomials is None:
+            self.statusBar.showMessage("Error: Thermo parser (read_nasa_polynomials) not available. Reverse rates disabled.")
+            self.thermo_data = {} 
+            return
+
+        try:
+            self.thermo_data = read_nasa_polynomials(self.thermo_filepath)
+            if not self.thermo_data:
+                self.statusBar.showMessage(f"Warning: No data read from {self.thermo_filepath}. Reverse rates may be affected.")
+                self.thermo_data = {} 
+            else:
+                self.statusBar.showMessage(f"Successfully loaded {len(self.thermo_data)} species from {self.thermo_filepath}.")
+        except FileNotFoundError:
+            self.statusBar.showMessage(f"Error: {self.thermo_filepath} not found. Reverse rates disabled.")
+            self.thermo_data = {}
+        except Exception as e:
+            self.statusBar.showMessage(f"Error parsing {self.thermo_filepath}: {e}. Reverse rates disabled.")
+            self.thermo_data = {}
+
 
     def _calculate_rate_for_reaction(self, reaction_data, T, P_atm):
         k = None
@@ -157,23 +234,217 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
 
     def _update_rate_constant_table(self, parsed_reactions):
         self.rate_table_widget.setRowCount(0)
-        table_temperatures = [500.0, 1000.0, 1500.0, 2000.0]
+        # self.table_temperatures is defined in __init__
         try:
             P_atm = float(self.pressure_entry.text())
-            if P_atm <= 0: self.statusBar.showMessage("Error: Pressure must be positive."); return
-        except ValueError: self.statusBar.showMessage("Error: Invalid pressure value."); return
+            if P_atm <= 0: self.statusBar.showMessage("Error: Pressure for Table must be positive."); return
+        except ValueError: self.statusBar.showMessage("Error: Invalid Pressure for Table."); return
 
         for row, reaction_data in enumerate(parsed_reactions):
             self.rate_table_widget.insertRow(row)
+            
+            # Column 0: Reaction string
             eq_display_str = reaction_data.get('equation_string_cleaned', reaction_data.get('equation_string', 'N/A'))
-            eq_item = QTableWidgetItem(eq_display_str); eq_item.setFlags(eq_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            eq_item = QTableWidgetItem(eq_display_str)
+            eq_item.setFlags(eq_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.rate_table_widget.setItem(row, 0, eq_item)
-            for col_idx, T_table in enumerate(table_temperatures, start=1):
-                k_val = self._calculate_rate_for_reaction(reaction_data, T_table, P_atm)
-                k_str = "%.3E" % k_val if k_val is not None and k_val > 0 else ("0.000E+00" if k_val == 0 else "N/A")
-                k_item = QTableWidgetItem(k_str); k_item.setFlags(k_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.rate_table_widget.setItem(row, col_idx, k_item)
+
+            # Column 1: "Calc Rev?" Checkbox
+            checkbox = QCheckBox()
+            # Store reaction_data with the checkbox for the handler
+            # Using a lambda that captures row and reaction_data
+            checkbox.stateChanged.connect(
+                lambda state, r=row, rd=reaction_data: self._on_calc_reverse_checkbox_changed(state, r, rd)
+            )
+            self.rate_table_widget.setCellWidget(row, 1, checkbox)
+            
+            # Store checkbox in reaction_data for potential future access if needed
+            reaction_data['calc_rev_checkbox'] = checkbox 
+
+            col_offset = 2 # Start populating kf, kr, etc. from column 2
+            for T_table in self.table_temperatures:
+                # kf
+                kf_val = self._calculate_rate_for_reaction(reaction_data, T_table, P_atm)
+                kf_str = "%.3E" % kf_val if kf_val is not None and kf_val > 0 else ("0.000E+00" if kf_val == 0 else "N/A")
+                kf_item = QTableWidgetItem(kf_str)
+                kf_item.setFlags(kf_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.rate_table_widget.setItem(row, col_offset, kf_item)
+                
+                # kr, Kc, Kp - Placeholders for now
+                na_item_flags = Qt.ItemFlag.ItemIsEnabled # Not editable, just enabled
+                kr_item = QTableWidgetItem("N/A"); kr_item.setFlags(na_item_flags)
+                kc_item = QTableWidgetItem("N/A"); kc_item.setFlags(na_item_flags)
+                kp_item = QTableWidgetItem("N/A"); kp_item.setFlags(na_item_flags)
+                
+                self.rate_table_widget.setItem(row, col_offset + 1, kr_item)
+                self.rate_table_widget.setItem(row, col_offset + 2, kc_item)
+                self.rate_table_widget.setItem(row, col_offset + 3, kp_item)
+                
+                col_offset += 4 # Move to the next block of 4 columns for the next temperature
+
         self.rate_table_widget.resizeColumnsToContents()
+
+        eq_string = reaction_data.get('equation_string_cleaned', reaction_data.get('equation_string', 'N/A'))
+        checkbox = self.rate_table_widget.cellWidget(row, 1) # Get the checkbox instance
+
+        if state == Qt.CheckState.Checked.value:
+            self.statusBar.showMessage(f"Calculating reverse rates for: {eq_string[:30]}...")
+            
+            if not all([get_reaction_thermo_properties, calculate_equilibrium_constant_kp,
+                        calculate_delta_n_gas, calculate_equilibrium_constant_kc,
+                        calculate_reverse_rate_constant, self.thermo_data is not None,
+                        is_valid_nasa_polynomial_string, append_nasa_polynomial_from_string]):
+                self.statusBar.showMessage("Error: Missing critical functions or thermo data. Reverse calc disabled.")
+                if checkbox: checkbox.setChecked(False)
+                return
+
+            # Check for missing species before iterating through temperatures
+            # This initial check uses the existing self.thermo_data
+            all_species_in_reaction = reaction_data.get('reactants', []) + reaction_data.get('products', [])
+            current_missing_species = set()
+            for spec_name, _ in all_species_in_reaction:
+                if not self.thermo_data.get(spec_name.upper()):
+                    current_missing_species.add(spec_name)
+            
+            if current_missing_species:
+                # print(f"Thermo data missing for: {current_missing_species}. Prompting user.")
+                dialog = NasaPolynomialInputDialog(sorted(list(current_missing_species)), self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    entered_text = dialog.polynomial_input_text_edit.toPlainText()
+                    if entered_text:
+                        is_valid, _, validation_errors = is_valid_nasa_polynomial_string(entered_text)
+                        if is_valid:
+                            append_success, append_msg = append_nasa_polynomial_from_string(self.thermo_filepath, entered_text)
+                            if append_success:
+                                self._load_thermo_data() # Reload thermo data
+                                self.statusBar.showMessage("Thermo data updated. Re-checking for current reaction...")
+                                # Re-check if data is now available for this specific reaction
+                                still_missing_after_update = set()
+                                for spec_name, _ in all_species_in_reaction:
+                                    if not self.thermo_data.get(spec_name.upper()): 
+                                        still_missing_after_update.add(spec_name)
+                                if still_missing_after_update:
+                                    self.statusBar.showMessage(f"Error: Thermo for {', '.join(still_missing_after_update)} still missing after update.")
+                                    self._clear_reverse_rate_cells(row); 
+                                    if checkbox: checkbox.setChecked(False); 
+                                    return
+                                # If all good, proceed to calculations below
+                            else: # Append failed
+                                self.statusBar.showMessage(f"Error appending thermo: {append_msg}")
+                                self._clear_reverse_rate_cells(row); 
+                                if checkbox: checkbox.setChecked(False); 
+                                return
+                        else: # Invalid polynomial string
+                            self.statusBar.showMessage("Invalid thermo input: " + "; ".join(validation_errors))
+                            self._clear_reverse_rate_cells(row); 
+                            if checkbox: checkbox.setChecked(False); 
+                            return
+                    else: # User submitted empty text
+                        self.statusBar.showMessage("No thermo data submitted for missing species.")
+                        self._clear_reverse_rate_cells(row); 
+                        if checkbox: checkbox.setChecked(False); 
+                        return
+                else: # User cancelled dialog
+                    self.statusBar.showMessage("Thermo input cancelled. Cannot calculate reverse rates.")
+                    self._clear_reverse_rate_cells(row); 
+                    if checkbox: checkbox.setChecked(False); 
+                    return
+            
+            # If we've reached here, either thermo data was initially available, or it was successfully updated and confirmed.
+            # Proceed to calculate and populate for each temperature point.
+            col_offset = 2 # kf starts at column 2
+            any_thermo_calc_error_for_reaction = False
+            for T_table in self.table_temperatures:
+                # Note: P_atm_table is not used for thermo calc, only for kf if it's P-dependent
+                # P_atm_table = float(self.pressure_entry.text()) 
+                
+                delta_H, delta_S, delta_G, missing_at_T, err_thermo_calc = \
+                    get_reaction_thermo_properties(reaction_data, T_table, self.thermo_data)
+
+                if err_thermo_calc:
+                    any_thermo_calc_error_for_reaction = True
+                    status_msg = f"Thermo error for {eq_string[:20]} at {T_table}K"
+                    if missing_at_T: status_msg += f": {', '.join(missing_at_T)}"
+                    # print(status_msg) # For debugging
+                    self._set_error_in_table_cells(row, col_offset, "Thermo Err")
+                    col_offset += 4
+                    continue 
+
+                Kp = calculate_equilibrium_constant_kp(delta_G, T_table)
+                self._set_table_item(row, col_offset + 3, Kp, "Error") # Kp
+
+                delta_n = calculate_delta_n_gas(reaction_data, self.thermo_data)
+                Kc = calculate_equilibrium_constant_kc(Kp, T_table, delta_n)
+                self._set_table_item(row, col_offset + 2, Kc, "Error") # Kc
+
+                kf_item = self.rate_table_widget.item(row, col_offset)
+                kf_val = None
+                if kf_item and kf_item.text() not in ["N/A", "Error", "kf Error", "Thermo Err"]: # Added "Thermo Err"
+                    try: kf_val = float(kf_item.text())
+                    except ValueError: pass # kf_val remains None
+                
+                kr_str = "Error" # Default if kf_val is None or Kc is None
+                if kf_val is not None and Kc is not None : # Ensure Kc is also valid
+                    kr = calculate_reverse_rate_constant(kf_val, Kc)
+                    kr_str = "%.3E" % kr if kr is not None else "Error"
+                elif kf_val is None:
+                    kr_str = "kf Error" 
+                # If Kc is None (error), kr_str remains "Error"
+                
+                self.rate_table_widget.setItem(row, col_offset + 1, QTableWidgetItem(kr_str)) # kr
+                col_offset += 4
+            
+            if not any_thermo_calc_error_for_reaction:
+                 self.statusBar.showMessage(f"Reverse rates updated for: {eq_string[:30]}...")
+            else:
+                 self.statusBar.showMessage(f"Reverse rates updated for {eq_string[:30]} (some errors).")
+
+
+        elif state == Qt.CheckState.Unchecked.value:
+            self.statusBar.showMessage(f"Reverse calc OFF for: {eq_string[:30]}...")
+            self._clear_reverse_rate_cells(row)
+
+    def _set_table_item(self, row, col, value, error_str="Error", precision="%.3E"):
+        item_str = error_str
+        if value is not None:
+            try:
+                item_str = precision % value
+            except TypeError: # value might be np.inf or similar that doesn't format well with %
+                item_str = str(value) 
+        self.rate_table_widget.setItem(row, col, QTableWidgetItem(item_str))
+
+    def _set_error_in_table_cells(self, row, start_col_offset, error_msg="Error"):
+        self.rate_table_widget.setItem(row, start_col_offset + 1, QTableWidgetItem(error_msg)) # kr
+        self.rate_table_widget.setItem(row, start_col_offset + 2, QTableWidgetItem(error_msg)) # Kc
+        self.rate_table_widget.setItem(row, start_col_offset + 3, QTableWidgetItem(error_msg)) # Kp
+
+    def _clear_reverse_rate_cells(self, row):
+        col_offset = 2 # kf starts at column 2
+        na_item_flags = Qt.ItemFlag.ItemIsEnabled
+        for _ in self.table_temperatures: # Iterate 4 times for the 4 temperature points
+            # kr is at col_offset + 1
+            # Kc is at col_offset + 2
+            # Kp is at col_offset + 3
+            kr_item = QTableWidgetItem("N/A"); kr_item.setFlags(na_item_flags)
+            kc_item = QTableWidgetItem("N/A"); kc_item.setFlags(na_item_flags)
+            kp_item = QTableWidgetItem("N/A"); kp_item.setFlags(na_item_flags)
+            self.rate_table_widget.setItem(row, col_offset + 1, kr_item)
+            self.rate_table_widget.setItem(row, col_offset + 2, kc_item)
+            self.rate_table_widget.setItem(row, col_offset + 3, kp_item)
+            col_offset += 4
+
+    def _clear_reverse_rate_cells(self, row):
+        col_offset = 2 # kf starts at column 2
+        na_item_flags = Qt.ItemFlag.ItemIsEnabled
+        for _ in self.table_temperatures:
+            kr_item = QTableWidgetItem("N/A"); kr_item.setFlags(na_item_flags)
+            kc_item = QTableWidgetItem("N/A"); kc_item.setFlags(na_item_flags)
+            kp_item = QTableWidgetItem("N/A"); kp_item.setFlags(na_item_flags)
+            self.rate_table_widget.setItem(row, col_offset + 1, kr_item)
+            self.rate_table_widget.setItem(row, col_offset + 2, kc_item)
+            self.rate_table_widget.setItem(row, col_offset + 3, kp_item)
+            col_offset += 4
+
 
     def _update_plot(self, parsed_reactions):
         self.plot_axes.clear()
@@ -290,9 +561,10 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
             QApplication.processEvents() 
             
             self._update_rate_constant_table(parsed_reactions)
-            self._update_plot(parsed_reactions) # Call the new plot update method
+            self._update_plot(parsed_reactions) 
             
-            self.statusBar.showMessage("Table and Plot updated successfully.")
+            P_table_val_str = self.pressure_entry.text() # Get current table pressure
+            self.statusBar.showMessage(f"Table (P={P_table_val_str} atm) and Plot updated.")
 
         except Exception as e:
             self.statusBar.showMessage(f"Error during processing: {e}")
@@ -305,3 +577,75 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QLabel, QTextEdit
+from PyQt6.QtGui import QFont
+
+class NasaPolynomialInputDialog(QDialog):
+    def __init__(self, missing_species_list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Input Missing Thermodynamic Data")
+        self.setMinimumWidth(600) # Set a reasonable minimum width
+        self.setMinimumHeight(400) # Set a reasonable minimum height
+
+        layout = QVBoxLayout(self)
+
+        instruction_text = (
+            f"NASA polynomials are missing for the following species: <b>{', '.join(missing_species_list)}</b>.<br><br>"
+            "Please paste complete NASA 7-coefficient polynomial strings below. "
+            "Each species entry is typically 4 lines (1 header line and 3 coefficient lines)."
+        )
+        self.instruction_label = QLabel(instruction_text)
+        self.instruction_label.setWordWrap(True)
+        layout.addWidget(self.instruction_label)
+
+        self.polynomial_input_text_edit = QTextEdit()
+        # Set a monospaced font for easier editing of fixed-format text
+        font = QFont("Courier New") # Or "Monospace", "Consolas", etc.
+        font.setPointSize(10) # Adjust size as needed
+        self.polynomial_input_text_edit.setFont(font)
+        self.polynomial_input_text_edit.setPlaceholderText(
+            "Example for one species (4 lines):\n"
+            "SPECIES_NAME      DATE    EL1 C1 EL2 C2 ... G Tlow Thigh Tcommon     1\n"
+            " A1_HIGH A2_HIGH A3_HIGH A4_HIGH A5_HIGH                             2\n"
+            " A6_HIGH A7_HIGH A1_LOW  A2_LOW  A3_LOW                              3\n"
+            " A4_LOW  A5_LOW  A6_LOW  A7_LOW                                      4"
+        )
+        layout.addWidget(self.polynomial_input_text_edit)
+
+        # Standard buttons
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.setLayout(layout)
+
+    # This method is part of how QDialog is typically used.
+    # The actual text retrieval will be done by the caller after dialog.exec().
+    # def get_polynomial_text(self): # This is not needed as a separate method on the dialog itself
+    #     return self.polynomial_input_text_edit.toPlainText() if self.result() == QDialog.DialogCode.Accepted else None
+
+# Example of how to call it (for testing, can be removed or integrated later)
+# if __name__ == "__main__":
+#     app = QApplication(sys.argv)
+#     # Create a dummy main window to act as parent for testing
+#     # In real use, 'self' from MainWindow would be the parent.
+#     # main_window_dummy = QMainWindow() 
+    
+#     missing_species = ["CH4_MISSING", "O2_MISSING", "H2O_VERY_LONG_SPECIES_NAME_EXAMPLE"]
+#     dialog = NasaPolynomialInputDialog(missing_species, parent=None) # or parent=main_window_dummy
+    
+#     if dialog.exec() == QDialog.DialogCode.Accepted:
+#         entered_text = dialog.polynomial_input_text_edit.toPlainText()
+#         if entered_text:
+#             print("Polynomials submitted:")
+#             print(entered_text)
+#         else:
+#             print("No polynomial text submitted.")
+#     else:
+#         print("Polynomial input cancelled.")
+    
+#     # main_window_dummy.show() # If you want to see a parent window
+#     # sys.exit(app.exec()) # This would run a new app loop. Only one app.exec() should run for the main app.

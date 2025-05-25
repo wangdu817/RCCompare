@@ -1,8 +1,237 @@
 import numpy as np
+import math # For np.exp, math.log if needed, though np usually handles it.
+
+# Assuming thermo_calculator.py is accessible
+try:
+    from thermo_calculator import get_thermo_properties
+except ImportError:
+    print("Warning: thermo_calculator.py not found or get_thermo_properties could not be imported.")
+    get_thermo_properties = None 
 
 # Global constants
 R_cal = 1.987204  # Gas constant in cal/mol-K
 R_atm_cm3 = 82.057 # Gas constant in cm^3*atm/mol-K
+
+# Constants for reverse rate calculation
+R_J_MOL_K = 8.314462618       # Gas constant in J/mol-K
+P_ATM_PA = 101325.0           # Standard pressure in Pascals (1 atm)
+R_L_ATM_MOL_K = 0.08205736608 # Gas constant in L*atm/mol-K
+
+
+def get_reaction_thermo_properties(reaction_data, T_kelvin, thermo_data_dict):
+    """
+    Calculates the change in standard enthalpy, entropy, and Gibbs free energy
+    for a reaction at a given temperature.
+
+    Args:
+        reaction_data (dict): Dictionary for a single reaction, including
+                              'reactants' and 'products' lists. Each item in
+                              these lists is expected to be a tuple or list
+                              like (species_name, stoichiometric_coeff).
+        T_kelvin (float): Temperature in Kelvin.
+        thermo_data_dict (dict): Dictionary of parsed thermodynamic data from
+                                 thermo_parser.read_nasa_polynomials.
+
+    Returns:
+        tuple: (delta_H_reaction_J_mol, delta_S_reaction_J_mol_K,
+                delta_G_reaction_J_mol, missing_species_list (list), error_occurred (bool))
+               Returns (None, None, None, missing_species_list, True) if any species' thermo data
+               is not found or T is out of range for any species.
+    """
+    if get_thermo_properties is None:
+        print("Error: get_thermo_properties function not available from thermo_calculator.")
+        return None, None, None, [], True # Return empty list for missing_species
+
+    delta_H_reaction = 0.0
+    delta_S_reaction = 0.0
+    delta_G_reaction = 0.0
+    missing_species_set = set() # Use a set to store unique missing species
+    error_occurred_flag = False
+
+    all_species_in_reaction = reaction_data.get('reactants', []) + reaction_data.get('products', [])
+
+    for species_name, _ in all_species_in_reaction:
+        # Check if species exists in thermo_data_dict first to identify missing ones
+        if not thermo_data_dict.get(species_name.upper()):
+            missing_species_set.add(species_name)
+            error_occurred_flag = True # Mark error if any species is missing from dict
+
+    if error_occurred_flag: # If any species are outright missing from the thermo_data
+        return None, None, None, sorted(list(missing_species_set)), True
+
+    # If all species are in thermo_data_dict, proceed to get properties
+    # Products
+    for species_name, coeff in reaction_data.get('products', []):
+        H, S, G, Cp = get_thermo_properties(species_name, T_kelvin, thermo_data_dict)
+        if H is None or S is None or G is None or Cp is None : # Check all relevant properties
+            # This implies T is out of range for an existing species, or other calculation error
+            # print(f"Error: Thermo properties could not be calculated for product {species_name} at {T_kelvin}K (likely T out of range).")
+            missing_species_set.add(species_name + f" (T_range @{T_kelvin}K)") # Indicate T-range issue
+            error_occurred_flag = True
+        else:
+            delta_H_reaction += coeff * H
+            delta_S_reaction += coeff * S
+            delta_G_reaction += coeff * G
+
+    # Reactants
+    for species_name, coeff in reaction_data.get('reactants', []):
+        H, S, G, Cp = get_thermo_properties(species_name, T_kelvin, thermo_data_dict)
+        if H is None or S is None or G is None or Cp is None:
+            # print(f"Error: Thermo properties could not be calculated for reactant {species_name} at {T_kelvin}K (likely T out of range).")
+            missing_species_set.add(species_name + f" (T_range @{T_kelvin}K)")
+            error_occurred_flag = True
+        else:
+            delta_H_reaction -= coeff * H
+            delta_S_reaction -= coeff * S
+            delta_G_reaction -= coeff * G
+    
+    if error_occurred_flag:
+        return None, None, None, sorted(list(missing_species_set)), True
+        
+    return delta_H_reaction, delta_S_reaction, delta_G_reaction, [], False
+
+
+def calculate_equilibrium_constant_kp(delta_G_reaction_J_mol, T_kelvin):
+    """
+    Calculates the equilibrium constant Kp from delta_G_reaction.
+
+    Args:
+        delta_G_reaction_J_mol (float): Standard Gibbs free energy change of reaction in J/mol.
+        T_kelvin (float): Temperature in Kelvin.
+
+    Returns:
+        float: The equilibrium constant Kp (unitless, based on activities/partial pressures
+               referenced to a standard state of 1 atm or 1 bar, effectively unitless).
+               Returns None if inputs are invalid or calculation fails.
+    """
+    if delta_G_reaction_J_mol is None or T_kelvin is None or T_kelvin <= 0:
+        return None
+    try:
+        # Kp = exp(-deltaG_0 / RT)
+        Kp = np.exp(-delta_G_reaction_J_mol / (R_J_MOL_K * T_kelvin))
+        return Kp
+    except OverflowError:
+        # print(f"OverflowError calculating Kp for deltaG={delta_G_reaction_J_mol} at T={T_kelvin}K.")
+        return np.inf # Or some other indicator of a very large number if appropriate
+    except Exception as e:
+        # print(f"Error calculating Kp: {e}")
+        return None
+
+def calculate_delta_n_gas(reaction_data, thermo_data_dict):
+    """
+    Calculates the change in the number of moles of gas-phase species in a reaction.
+
+    Args:
+        reaction_data (dict): Dictionary for a single reaction.
+        thermo_data_dict (dict): Dictionary of parsed thermodynamic data.
+                                 Used to check phase if available.
+
+    Returns:
+        float: The change in moles of gas, delta_n_gas.
+               Returns 0 if phase information is not available and cannot be determined.
+    """
+    delta_n = 0.0
+    
+    # Helper to check if a species is gas phase
+    def is_gas(species_name, thermo_db):
+        if get_thermo_properties is None: # Relies on thermo_calculator being imported
+            return True # Assume gas if thermo lookup isn't possible
+
+        species_thermo_data = thermo_db.get(species_name.upper())
+        if species_thermo_data:
+            phase = species_thermo_data.get('phase')
+            if phase and isinstance(phase, str) and phase.upper() == 'G':
+                return True
+            elif phase is None: # If phase is not specified, assume gas (common in some CHEMKIN files)
+                return True 
+            return False # If phase is specified and not 'G'
+        return True # Assume gas if species not in thermo_db (could be an error, but delta_n proceeds)
+
+    # Products
+    for species_name, coeff in reaction_data.get('products', []):
+        if is_gas(species_name, thermo_data_dict):
+            delta_n += coeff
+            
+    # Reactants
+    for species_name, coeff in reaction_data.get('reactants', []):
+        if is_gas(species_name, thermo_data_dict):
+            delta_n -= coeff
+            
+    return delta_n
+
+
+def calculate_equilibrium_constant_kc(Kp, T_kelvin, delta_n_gas):
+    """
+    Calculates the equilibrium constant Kc from Kp.
+    Kc = Kp * (1/(R_L_ATM_MOL_K * T)) ^ delta_n_gas
+    Assumes Kp is unitless (activities/partial pressures referenced to 1 atm standard state)
+    and Kc is in (mol/L)^delta_n_gas.
+
+    Args:
+        Kp (float): The equilibrium constant Kp.
+        T_kelvin (float): Temperature in Kelvin.
+        delta_n_gas (float): Change in the number of moles of gas-phase species.
+
+    Returns:
+        float: The equilibrium constant Kc.
+               Returns None if inputs are invalid or calculation fails.
+    """
+    if Kp is None or T_kelvin is None or T_kelvin <= 0 or delta_n_gas is None:
+        return None
+    
+    try:
+        # Factor = (1 / (R_L_ATM_MOL_K * T_kelvin))
+        # Kc = Kp * (Factor ^ delta_n_gas)
+        # Using R_L_ATM_MOL_K (0.082057 L*atm/mol*K)
+        # If Kp is unitless (standard state P_std = 1 atm), then
+        # Kc = Kp * (P_std / (R_L_ATM_MOL_K * T_kelvin)) ^ delta_n_gas
+        # Since P_std = 1 atm, this simplifies to Kp * (1 / (R_L_ATM_MOL_K * T_kelvin)) ^ delta_n_gas
+        
+        RT = R_L_ATM_MOL_K * T_kelvin
+        if RT == 0: # Avoid division by zero if T_kelvin was not strictly > 0
+            return None 
+            
+        conversion_factor = 1.0 / RT
+        Kc = Kp * (conversion_factor ** delta_n_gas)
+        return Kc
+    except OverflowError:
+        # print(f"OverflowError calculating Kc for Kp={Kp}, T={T_kelvin}K, delta_n={delta_n_gas}.")
+        return np.inf # Or some other indicator
+    except Exception as e:
+        # print(f"Error calculating Kc: {e}")
+        return None
+
+def calculate_reverse_rate_constant(kf, Kc):
+    """
+    Calculates the reverse rate constant (kr) from the forward rate
+    constant (kf) and the equilibrium constant in concentration units (Kc).
+
+    Args:
+        kf (float): Forward rate constant. Units depend on reaction order,
+                    but must be consistent with Kc's implied concentration units.
+        Kc (float): Equilibrium constant in concentration units (e.g., (mol/L)^delta_n).
+
+    Returns:
+        float: Reverse rate constant kr.
+               Returns None if inputs are invalid or Kc is zero.
+    """
+    if kf is None or Kc is None:
+        return None
+    if Kc == 0: # Avoid division by zero
+        # print("Warning: Kc is zero, reverse rate constant cannot be determined (or is infinite).")
+        return None # Or np.inf if that's preferred for an "infinitely fast" reverse reaction
+    
+    try:
+        kr = kf / Kc
+        return kr
+    except OverflowError:
+        # print(f"OverflowError calculating kr for kf={kf}, Kc={Kc}.")
+        # This case is less common if kf and Kc are typical floats unless Kc is extremely small.
+        return np.inf 
+    except Exception as e:
+        # print(f"Error calculating kr: {e}")
+        return None
+
 
 def _convert_ea_to_cal_per_mol(Ea_original, units_str):
     """

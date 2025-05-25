@@ -1,7 +1,10 @@
 import unittest
 import numpy as np
+from unittest import mock # Make sure mock is imported
+
+# Existing imports from rate_calculator
 from rate_calculator import (
-    _convert_ea_to_cal_per_mol, # Make sure to test this if it's directly callable, or test via main functions
+    _convert_ea_to_cal_per_mol, 
     get_third_body_concentration,
     calculate_arrhenius_rate,
     calculate_plog_rate,
@@ -9,6 +12,22 @@ from rate_calculator import (
     R_cal, 
     R_atm_cm3
 )
+
+# Imports for new reverse rate calculation tests
+try:
+    from rate_calculator import (
+        get_reaction_thermo_properties, calculate_equilibrium_constant_kp,
+        calculate_delta_n_gas, calculate_equilibrium_constant_kc,
+        calculate_reverse_rate_constant, R_J_MOL_K, R_L_ATM_MOL_K
+    )
+except ImportError:
+    get_reaction_thermo_properties = None
+    calculate_equilibrium_constant_kp = None
+    calculate_delta_n_gas = None
+    calculate_equilibrium_constant_kc = None
+    calculate_reverse_rate_constant = None
+    R_J_MOL_K = 8.314462618 
+    R_L_ATM_MOL_K = 0.08205736608
 
 class TestRateCalculatorNew(unittest.TestCase):
 
@@ -156,44 +175,33 @@ class TestRateCalculatorNew(unittest.TestCase):
         alpha, T3s, T1s, T2s = troe_data1['coeffs']
         F_cent_exp = (1 - alpha) * np.exp(-T / T3s) + alpha * np.exp(-T / T1s) + np.exp(-T / T2s)
         
-        log10_Pr_exp = np.log10(Pr_exp)
+        log10_Pr_exp = np.log10(Pr_exp) if Pr_exp > 0 else -np.inf # Avoid log(0)
         c_exp = -0.4 - 0.67 * log10_Pr_exp
         n_exp = 0.75 - 1.27 * log10_Pr_exp
         val_exp = log10_Pr_exp - c_exp
         denom_exp = n_exp - 0.14 * val_exp
-        F_exp = 10**(np.log10(F_cent_exp) / (1.0 + (val_exp / denom_exp)**2))
-        
+        F_exp = 10**(np.log10(F_cent_exp) / (1.0 + (val_exp / denom_exp)**2)) if F_cent_exp > 0 and denom_exp != 0 else 1.0
         k_expected = k_inf_val_exp * (Pr_exp / (1 + Pr_exp)) * F_exp
         
         k_calc = calculate_troe_rate(troe_data1, T, P_target, M_conc=None)
         self.assertAlmostEqual(k_calc, k_expected, delta=k_expected * 1e-5)
 
         # Test with missing k0
-        troe_data_no_k0 = {
-            'k_inf': {'A': 1.0E14, 'n': 0.0, 'Ea': 2.0, 'units': 'KCAL/MOLE'},
-            'k0': {}, # Missing A, n, Ea
-            'coeffs': [0.6, 200.0, 1200.0] 
-        }
+        troe_data_no_k0 = {'k_inf': troe_data1['k_inf'], 'k0': {}, 'coeffs': troe_data1['coeffs']}
         self.assertIsNone(calculate_troe_rate(troe_data_no_k0, T, P_target, None))
 
         # Test with missing k_inf
-        troe_data_no_kinf = {
-            'k_inf': {},
-            'k0': {'A': 1.0E16, 'n': 0.0, 'Ea': 500.0, 'units': 'CAL/MOLE'},
-            'coeffs': [0.6, 200.0, 1200.0] 
-        }
+        troe_data_no_kinf = {'k_inf': {}, 'k0': troe_data1['k0'], 'coeffs': troe_data1['coeffs']}
         self.assertIsNone(calculate_troe_rate(troe_data_no_kinf, T, P_target, None))
 
         # Test with missing troe_coeffs
-        troe_data_no_coeffs = {
-            'k_inf': {'A': 1.0E14, 'n': 0.0, 'Ea': 2.0, 'units': 'KCAL/MOLE'},
-            'k0': {'A': 1.0E16, 'n': 0.0, 'Ea': 500.0, 'units': 'CAL/MOLE'},
-            'coeffs': [] 
-        }
+        troe_data_no_coeffs = {'k_inf': troe_data1['k_inf'], 'k0': troe_data1['k0'], 'coeffs': [] }
         self.assertIsNone(calculate_troe_rate(troe_data_no_coeffs, T, P_target, None))
 
         # Test with M_conc provided directly
         M_conc_direct = 0.05 # mol/cm^3, arbitrary value
+
+
         # Recalculate Pr_exp and k_expected with M_conc_direct
         k_inf_val_exp_direct = 1.0E14 * np.exp(-2000.0 / (R_cal * T)) # Same k_inf
         k0_val_exp_direct = 1.0E16 * np.exp(-500.0 / (R_cal * T))   # Same k0
@@ -204,57 +212,164 @@ class TestRateCalculatorNew(unittest.TestCase):
         F_cent_exp_direct = (1 - alpha_d) * np.exp(-T / T3s_d) + alpha_d * np.exp(-T / T1s_d) + np.exp(-T / T2s_d)
         
         log10_Pr_exp_direct = np.log10(Pr_exp_direct)
-        c_exp_direct = -0.4 - 0.67 * log10_Pr_exp_direct
-        n_exp_direct = 0.75 - 1.27 * log10_Pr_exp_direct
-        val_exp_direct = log10_Pr_exp_direct - c_exp_direct
-        denom_exp_direct = n_exp_direct - 0.14 * val_exp_direct
-        F_exp_direct = 10**(np.log10(F_cent_exp_direct) / (1.0 + (val_exp_direct / denom_exp_direct)**2))
+
+        F_exp_direct = 10**(np.log10(F_cent_exp_direct) / (1.0 + (val_exp_direct / denom_exp_direct)**2)) if F_cent_exp_direct > 0 and denom_exp_direct != 0 else 1.0
         
-        k_expected_direct_M = k_inf_val_exp_direct * (Pr_exp_direct / (1 + Pr_exp_direct)) * F_exp_direct
-        k_calc_direct_M = calculate_troe_rate(troe_data1, T, P_target=999, M_conc=M_conc_direct) # P_target should be ignored
+        k_expected_direct_M = k_inf_val_exp * (Pr_exp_direct / (1 + Pr_exp_direct)) * F_exp_direct
+        k_calc_direct_M = calculate_troe_rate(troe_data1, T, P_target=999, M_conc=M_conc_direct) 
         self.assertAlmostEqual(k_calc_direct_M, k_expected_direct_M, delta=k_expected_direct_M * 1e-5)
 
-        # Test with P_target = 0 (when M_conc is None)
-        # This should result in M_conc = 0, so k0_eff = 0, Pr = 0.
-        # When Pr = 0, F is typically 1 (or can be, depending on Pr range for F formula).
-        # k = k_inf * (0 / (1+0)) * F = 0
         self.assertAlmostEqual(calculate_troe_rate(troe_data1, T, P_target=0, M_conc=None), 0.0, places=8)
-
-        # Test with P_target < 0 (when M_conc is None) -> should return None based on current code structure
         self.assertIsNone(calculate_troe_rate(troe_data1, T, P_target=-1.0, M_conc=None))
-
-
-        # Test with T <= 0
         self.assertIsNone(calculate_troe_rate(troe_data1, 0, P_target, M_conc=None))
         self.assertIsNone(calculate_troe_rate(troe_data1, -100, P_target, M_conc=None))
 
-        # Test with invalid Troe coefficients
-        troe_invalid_coeffs1 = {**troe_data1, 'coeffs': [0.6, 0.0, 1200.0]} # T3star = 0
+        troe_invalid_coeffs1 = {**troe_data1, 'coeffs': [0.6, 0.0, 1200.0]}
         self.assertIsNone(calculate_troe_rate(troe_invalid_coeffs1, T, P_target, None))
         
-        troe_invalid_coeffs2 = {**troe_data1, 'coeffs': [0.6, 200.0, -100.0]} # T1star < 0
+        troe_invalid_coeffs2 = {**troe_data1, 'coeffs': [0.6, 200.0, -100.0]}
         self.assertIsNone(calculate_troe_rate(troe_invalid_coeffs2, T, P_target, None))
 
-        # Test with non-positive T2star (optional 4th coeff) - should still run if T2star is None or not there
-        # If T2star is present and non-positive, it might cause issues if not handled in main code.
-        # The main code has: if len(troe_coeffs) >= 4 and troe_coeffs[3] is not None: T2star = troe_coeffs[3]
-        # if T2star > 0: F_cent += np.exp(-T / T2star)
-        # So a non-positive T2star (if present) means it's not added to F_cent. This is fine.
-        troe_non_positive_T2s = {
-            'k_inf': {'A': 1.0E14, 'n': 0.0, 'Ea': 2.0, 'units': 'KCAL/MOLE'},
-            'k0': {'A': 1.0E16, 'n': 0.0, 'Ea': 500.0, 'units': 'CAL/MOLE'},
-            'coeffs': [0.6, 200.0, 1200.0, -50.0] # T2star < 0
-        }
-        # This should run, as -50.0 for T2star means the term np.exp(-T / T2star) is not added.
-        # Let's calculate without the T2s term from troe_data1
+        troe_non_positive_T2s = {**troe_data1, 'coeffs': [0.6, 200.0, 1200.0, -50.0]}
         alpha_noT2s, T3s_noT2s, T1s_noT2s, _ = troe_data1['coeffs']
         F_cent_exp_noT2s = (1 - alpha_noT2s) * np.exp(-T / T3s_noT2s) + alpha_noT2s * np.exp(-T / T1s_noT2s)
-        log10_Pr_exp_noT2s = np.log10(Pr_exp) # Pr_exp from original troe_data1 calculation at P_target=1
+        log10_Pr_exp_noT2s = np.log10(Pr_exp) if Pr_exp > 0 else -np.inf
         c_exp_noT2s = -0.4 - 0.67 * log10_Pr_exp_noT2s
         n_exp_noT2s = 0.75 - 1.27 * log10_Pr_exp_noT2s
         val_exp_noT2s = log10_Pr_exp_noT2s - c_exp_noT2s
         denom_exp_noT2s = n_exp_noT2s - 0.14 * val_exp_noT2s
-        F_exp_noT2s = 10**(np.log10(F_cent_exp_noT2s) / (1.0 + (val_exp_noT2s / denom_exp_noT2s)**2))
+        F_exp_noT2s = 10**(np.log10(F_cent_exp_noT2s) / (1.0 + (val_exp_noT2s / denom_exp_noT2s)**2)) if F_cent_exp_noT2s > 0 and denom_exp_noT2s != 0 else 1.0
         k_expected_noT2s = k_inf_val_exp * (Pr_exp / (1 + Pr_exp)) * F_exp_noT2s
         self.assertAlmostEqual(calculate_troe_rate(troe_non_positive_T2s, T, P_target, None), k_expected_noT2s, delta=k_expected_noT2s*1e-5)
+        
+        troe_with_None_T2s = {**troe_data1, 'coeffs': [0.6, 200.0, 1200.0, None]}
+        self.assertAlmostEqual(calculate_troe_rate(troe_with_None_T2s, T, P_target, None), k_expected_noT2s, delta=k_expected_noT2s*1e-5)
+
+# ---- New Test Classes for Reverse Rate Calculations ----
+MOCK_THERMO_SPECIES_PROPERTIES = {
+    "A": (10000.0, 200.0, -190000.0, 50.0), 
+    "B": (15000.0, 220.0, -205000.0, 60.0),
+    "C": (5000.0, 180.0, -175000.0, 40.0),
+    "D_SOLID": (2000.0, 50.0, -48000.0, 30.0),
+    "X_TRANGE": (None, None, None, None) 
+}
+
+MOCK_THERMO_DATA_DICT = {
+    "A": {'species_name': "A", 'phase': 'G'}, 
+    "B": {'species_name': "B", 'phase': 'G'},
+    "C": {'species_name': "C", 'phase': 'G'},
+    "D_SOLID": {'species_name': "D_SOLID", 'phase': 'S'},
+    "X_TRANGE": {'species_name': "X_TRANGE", 'phase': 'G'}
+}
+
+def mock_get_thermo_properties_for_rate_calc_tests(species_name, T_kelvin, thermo_data_dict_ignored):
+    if T_kelvin == 1000.0: # Mock specific behavior for T=1000K
+        return MOCK_THERMO_SPECIES_PROPERTIES.get(species_name.upper(), (None, None, None, None))
+    # Add behavior for other temperatures if needed by other tests, or keep it simple
+    return (None, None, None, None) # Default for unmocked T or species
+
+@mock.patch('rate_calculator.get_thermo_properties', mock_get_thermo_properties_for_rate_calc_tests)
+class TestGetReactionThermoProperties(unittest.TestCase):
+    def setUp(self):
+        if get_reaction_thermo_properties is None:
+            self.skipTest("get_reaction_thermo_properties not imported.")
+        self.reaction_AB_C = {'reactants': [('A',1), ('B',1)], 'products': [('C',1)]}
+        self.reaction_missing_from_dict = {'reactants': [('Z_NOT_IN_DICT',1)], 'products': [('A',1)]}
+        self.reaction_calc_error_for_species = {'reactants': [('A',1)], 'products': [('X_TRANGE',1)]}
+
+    def test_calc_delta_hsg_simple_reaction_AB_C(self):
+        dH, dS, dG, missing, err = get_reaction_thermo_properties(self.reaction_AB_C, 1000.0, MOCK_THERMO_DATA_DICT)
+        self.assertFalse(err)
+        self.assertEqual(len(missing), 0)
+        self.assertAlmostEqual(dH, -20000.0) # 5000 - (10000+15000)
+        self.assertAlmostEqual(dS, -240.0)  # 180 - (200+220)
+        self.assertAlmostEqual(dG, 220000.0) # -175000 - (-190000 + -205000)
+
+    def test_species_missing_from_thermo_data_dict(self):
+        dH, dS, dG, missing, err = get_reaction_thermo_properties(self.reaction_missing_from_dict, 1000.0, MOCK_THERMO_DATA_DICT)
+        self.assertTrue(err)
+        self.assertIn("Z_NOT_IN_DICT", missing)
+        self.assertIsNone(dH)
+
+    def test_thermo_calculation_error_for_species(self): # e.g. T out of range
+        dH, dS, dG, missing, err = get_reaction_thermo_properties(self.reaction_trange_err, 1000.0, MOCK_THERMO_DATA_DICT)
+        self.assertTrue(err) 
+        self.assertTrue(any("X_TRANGE (T_range @1000.0K)" in m for m in missing))
+        self.assertIsNone(dH)
+
+class TestCalculateEquilibriumConstantKp(unittest.TestCase):
+    def test_kp_calc_valid_input(self):
+        if calculate_equilibrium_constant_kp is None: self.skipTest("Kp function not imported.")
+        expected_Kp = np.exp(5000.0 / (R_J_MOL_K * 1000.0)) # dG = -5000 J/mol
+        self.assertAlmostEqual(calculate_equilibrium_constant_kp(-5000.0, 1000.0), expected_Kp)
+
+    def test_kp_calc_T_zero_or_negative(self):
+        if calculate_equilibrium_constant_kp is None: self.skipTest("Kp function not imported.")
+        self.assertIsNone(calculate_equilibrium_constant_kp(-5000.0, 0.0))
+        self.assertIsNone(calculate_equilibrium_constant_kp(-5000.0, -100.0))
+        
+    def test_kp_calc_dG_None(self):
+        if calculate_equilibrium_constant_kp is None: self.skipTest("Kp function not imported.")
+        self.assertIsNone(calculate_equilibrium_constant_kp(None, 1000.0))
+
+    def test_kp_overflow_and_underflow(self): 
+        if calculate_equilibrium_constant_kp is None: self.skipTest("Kp function not imported.")
+        # Test overflow: -dG / RT is very large positive
+        overflow_neg_dG = -710 * R_J_MOL_K * 1000.0 # exp(710) overflows float64
+        self.assertEqual(calculate_equilibrium_constant_kp(overflow_neg_dG, 1000.0), np.inf)
+        # Test underflow: -dG / RT is very large negative (dG is very large positive)
+        large_pos_dG = 710 * R_J_MOL_K * 1000.0 # exp(-710) is ~0
+        self.assertAlmostEqual(calculate_equilibrium_constant_kp(large_pos_dG, 1000.0), 0.0)
+
+class TestCalculateDeltaNGas(unittest.TestCase):
+    def setUp(self):
+        if calculate_delta_n_gas is None: self.skipTest("delta_n_gas function not imported.")
+        self.mock_thermo = MOCK_THERMO_DATA_DICT 
+
+    def test_delta_n_all_gas(self):
+        reaction = {'reactants': [('A',1), ('B',1)], 'products': [('C',1)]} 
+        self.assertEqual(calculate_delta_n_gas(reaction, self.mock_thermo), -1.0)
+
+    def test_delta_n_mixed_phase(self):
+        reaction = {'reactants': [('A',1), ('D_SOLID',1)], 'products': [('C',1)]}
+        self.assertEqual(calculate_delta_n_gas(reaction, self.mock_thermo), 0.0)
+        
+    def test_delta_n_species_not_in_thermo_defaults_to_gas(self):
+        reaction = {'reactants': [('X_UNKNOWN',1)], 'products': [('Y_UNKNOWN',1), ('Z_UNKNOWN',1)]} 
+        self.assertEqual(calculate_delta_n_gas(reaction, self.mock_thermo), 1.0) # Z+Y - X = 1+1-1 = 1
+
+class TestCalculateEquilibriumConstantKc(unittest.TestCase):
+    def test_kc_calc_valid_input(self):
+        if calculate_equilibrium_constant_kc is None: self.skipTest("Kc function not imported.")
+        R_L = R_L_ATM_MOL_K 
+        Kp, T, dn = 100.0, 1000.0, -1.0
+        expected_Kc = Kp * ( (1.0 / (R_L * T)) ** dn )
+        self.assertAlmostEqual(calculate_equilibrium_constant_kc(Kp, T, dn), expected_Kc)
+
+    def test_kc_calc_T_zero_or_negative(self):
+        if calculate_equilibrium_constant_kc is None: self.skipTest("Kc function not imported.")
+        self.assertIsNone(calculate_equilibrium_constant_kc(100.0, 0.0, 1.0))
+        self.assertIsNone(calculate_equilibrium_constant_kc(100.0, -100.0, 1.0))
+
+    def test_kc_with_invalid_inputs(self):
+        if calculate_equilibrium_constant_kc is None: self.skipTest("Kc function not imported.")
+        self.assertIsNone(calculate_equilibrium_constant_kc(None, 1000.0, 1.0)) # Kp is None
+        self.assertIsNone(calculate_equilibrium_constant_kc(100.0, 1000.0, None)) # delta_n_gas is None
+
+class TestCalculateReverseRateConstant(unittest.TestCase):
+    def test_kr_calc_valid_input(self):
+        if calculate_reverse_rate_constant is None: self.skipTest("kr function not imported.")
+        self.assertAlmostEqual(calculate_reverse_rate_constant(kf=100.0, Kc=10.0), 10.0)
+
+    def test_kr_with_Kc_zero(self):
+        if calculate_reverse_rate_constant is None: self.skipTest("kr function not imported.")
+        self.assertIsNone(calculate_reverse_rate_constant(kf=100.0, Kc=0.0))
+
+    def test_kr_with_invalid_inputs(self):
+        if calculate_reverse_rate_constant is None: self.skipTest("kr function not imported.")
+        self.assertIsNone(calculate_reverse_rate_constant(kf=100.0, Kc=None))
+        self.assertIsNone(calculate_reverse_rate_constant(kf=None, Kc=10.0))
+
+if __name__ == '__main__':
+    unittest.main()
 

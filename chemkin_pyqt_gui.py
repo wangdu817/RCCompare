@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar # Use alias directly
 from matplotlib.figure import Figure
 
 # Assuming chemkin_parser.py and rate_calculator.py are in the same directory or accessible in PYTHONPATH
@@ -72,8 +73,16 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
         self.controls_layout.addRow("Min Temperature (K):", self.temp_min_entry)
         self.temp_max_entry = QLineEdit("2500")
         self.controls_layout.addRow("Max Temperature (K):", self.temp_max_entry)
-        self.pressure_entry = QLineEdit("1.0")
-        self.controls_layout.addRow("Pressure (atm):", self.pressure_entry)
+        
+        self.pressure_entry = QLineEdit("1.0") # Existing single pressure entry
+        self.controls_layout.addRow("Pressure for Table (atm):", self.pressure_entry) # Renamed label for clarity
+
+        self.pressure_min_entry = QLineEdit("1.0")
+        self.controls_layout.addRow("Min Plot Pressure (atm):", self.pressure_min_entry)
+        self.pressure_max_entry = QLineEdit("10.0")
+        self.controls_layout.addRow("Max Plot Pressure (atm):", self.pressure_max_entry)
+        self.pressure_log_steps_entry = QLineEdit("5")
+        self.controls_layout.addRow("Log Plot Pressure Steps:", self.pressure_log_steps_entry)
         
         self.left_panel_layout.addWidget(self.controls_groupbox)
 
@@ -94,7 +103,12 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
         plot_layout = QVBoxLayout(self.plot_area_widget) # Layout for the plot_area_widget
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.figure_canvas = FigureCanvas(self.figure)
-        plot_layout.addWidget(self.figure_canvas)
+        
+        # Create and add the Matplotlib Navigation Toolbar
+        self.plot_toolbar = NavigationToolbar(self.figure_canvas, self.plot_area_widget) # Parent is plot_area_widget
+        plot_layout.addWidget(self.plot_toolbar)
+        
+        plot_layout.addWidget(self.figure_canvas) # Add canvas after toolbar
         self.plot_axes = self.figure.add_subplot(111)
         # self.plot_area_widget.setLayout(plot_layout) # Already set by passing to QVBoxLayout constructor
         self.right_panel_splitter.addWidget(self.plot_area_widget)
@@ -166,34 +180,83 @@ H + O2 (+M) = HO2 (+M)    1.0E12 0.5 0.0   1.0E16 0.0 -1000.0 TROE / 0.6 100.0 1
         try:
             T_min = float(self.temp_min_entry.text())
             T_max = float(self.temp_max_entry.text())
-            P_atm = float(self.pressure_entry.text())
-            if not (T_max > T_min and T_min > 0 and P_atm >= 0): # P_atm can be 0 for some cases
-                self.statusBar.showMessage("Error: Invalid T_min/T_max or Pressure. Ensure T_max > T_min > 0, P >= 0.")
-                self.figure_canvas.draw() # Redraw cleared axes
-                return
+            if not (T_max > T_min and T_min > 0):
+                self.statusBar.showMessage("Error: Invalid Temperature range. Ensure T_max > T_min > 0.")
+                self.figure_canvas.draw(); return
+            T_values = np.linspace(T_min, T_max, 100)
+
+            P_table_atm = float(self.pressure_entry.text()) # For table and non-P-dependent reactions
+            if P_table_atm <= 0:
+                self.statusBar.showMessage("Error: Pressure for Table (atm) must be positive.")
+                self.figure_canvas.draw(); return
+
+            P_min_plot = float(self.pressure_min_entry.text())
+            P_max_plot = float(self.pressure_max_entry.text())
+            P_log_steps = int(self.pressure_log_steps_entry.text())
+
+            use_pressure_range_plotting = False
+            P_plot_values = [P_table_atm] # Default to single pressure from table entry
+
+            if P_min_plot > 0 and P_max_plot >= P_min_plot and P_log_steps > 0:
+                use_pressure_range_plotting = True
+                if P_log_steps == 1:
+                    P_plot_values = np.array([P_min_plot]) # Use Min Plot P if steps is 1
+                elif P_min_plot == P_max_plot : # handles steps > 1 but min=max
+                    P_plot_values = np.array([P_min_plot])
+                    use_pressure_range_plotting = True # Still treat as "range" for labeling consistency
+                else: # P_max_plot > P_min_plot and P_log_steps > 1
+                    P_plot_values = np.logspace(np.log10(P_min_plot), np.log10(P_max_plot), num=P_log_steps)
+            # If P_min_plot, P_max_plot, P_log_steps are not set for a range, P_plot_values remains [P_table_atm]
+            # and use_pressure_range_plotting remains False (unless min=max and steps=1, handled above)
+
         except ValueError:
             self.statusBar.showMessage("Error: Temperature/Pressure values must be numeric.")
-            self.figure_canvas.draw() # Redraw cleared axes
-            return
+            self.figure_canvas.draw(); return
+        except Exception as e:
+            self.statusBar.showMessage(f"Error processing plot parameters: {e}")
+            self.figure_canvas.draw(); return
 
-        T_values = np.linspace(T_min, T_max, 100)
         num_lines_plotted = 0
         for reaction_data in parsed_reactions:
-            k_values_log10 = []
-            for T_val in T_values:
-                k = self._calculate_rate_for_reaction(reaction_data, T_val, P_atm)
-                if k is not None and k > 1e-100: # Avoid log10(0) or very small numbers
-                    k_values_log10.append(np.log10(k))
-                else:
-                    k_values_log10.append(np.nan)
-            
-            if any(not np.isnan(val) for val in k_values_log10):
-                self.plot_axes.plot(T_values, k_values_log10, label=reaction_data.get('equation_string_cleaned', reaction_data.get('equation_string', 'N/A')))
-                num_lines_plotted +=1
+            reaction_label_base = reaction_data.get('equation_string_cleaned', reaction_data.get('equation_string', 'N/A'))
+            reaction_type = reaction_data.get('reaction_type', 'ARRHENIUS')
 
+            if use_pressure_range_plotting and reaction_type in ['PLOG', 'TROE']:
+                for P_val in P_plot_values:
+                    k_values_log10 = []
+                    for T_val in T_values:
+                        k = self._calculate_rate_for_reaction(reaction_data, T_val, P_val)
+                        if k is not None and k > 1e-100:
+                            k_values_log10.append(np.log10(k))
+                        else:
+                            k_values_log10.append(np.nan)
+                    
+                    if any(not np.isnan(val) for val in k_values_log10):
+                        label = f"{reaction_label_base} @ {P_val:.2E} atm"
+                        self.plot_axes.plot(T_values, k_values_log10, label=label)
+                        num_lines_plotted +=1
+            else: # Arrhenius or single pressure plot mode
+                k_values_log10 = []
+                # For Arrhenius, P_table_atm is irrelevant for calculation but used for consistency if needed elsewhere
+                # For PLOG/TROE in single pressure mode, P_table_atm is used.
+                current_P_for_plot = P_table_atm
+                for T_val in T_values:
+                    k = self._calculate_rate_for_reaction(reaction_data, T_val, current_P_for_plot)
+                    if k is not None and k > 1e-100:
+                        k_values_log10.append(np.log10(k))
+                    else:
+                        k_values_log10.append(np.nan)
+                
+                if any(not np.isnan(val) for val in k_values_log10):
+                    label = reaction_label_base
+                    if reaction_type in ['PLOG', 'TROE']: # Add pressure info for P-dependent reactions
+                        label += f" @ {current_P_for_plot:.2E} atm (Table P)"
+                    self.plot_axes.plot(T_values, k_values_log10, label=label)
+                    num_lines_plotted +=1
+        
         self.plot_axes.set_xlabel("Temperature (K)")
         self.plot_axes.set_ylabel("log10(k)")
-        self.plot_axes.set_title(f"Reaction Rates at {P_atm:.2f} atm")
+        self.plot_axes.set_title("Reaction Rates vs Temperature")
         if num_lines_plotted > 0:
             self.plot_axes.legend(fontsize='small')
         self.plot_axes.grid(True)

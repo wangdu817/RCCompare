@@ -33,8 +33,9 @@ class TestRateCalculatorNew(unittest.TestCase):
     def test_get_third_body_concentration(self):
         expected_M = 1 / (R_atm_cm3 * 298.0) 
         self.assertAlmostEqual(get_third_body_concentration(1.0, 298.0), expected_M, places=8)
-        self.assertEqual(get_third_body_concentration(1.0, 0.0), 0.0)
-        self.assertEqual(get_third_body_concentration(-1.0, 298.0), 0.0)
+        self.assertEqual(get_third_body_concentration(1.0, 0.0), 0.0) # T=0 should return 0
+        self.assertEqual(get_third_body_concentration(-1.0, 298.0), 0.0) # P<0 should return 0
+        self.assertEqual(get_third_body_concentration(0.0, 298.0), 0.0) # P=0 should return 0
 
     def test_calculate_arrhenius_rate_new_structure(self):
         T1 = 1000.0
@@ -81,6 +82,59 @@ class TestRateCalculatorNew(unittest.TestCase):
         log_k_expected_interp = log_k1 + (log_k2 - log_k1) * (log_P_target_interp - log_P1) / (log_P2 - log_P1)
         expected_k_interp = np.exp(log_k_expected_interp)
         self.assertAlmostEqual(calculate_plog_rate(plog_entries, T_test, 5.0), expected_k_interp, delta=expected_k_interp*1e-5)
+
+        # Test extrapolation (P_target below min pressure)
+        self.assertAlmostEqual(calculate_plog_rate(plog_entries, T_test, 0.1), k1_val, delta=k1_val*1e-5)
+        # Test extrapolation (P_target above max pressure)
+        self.assertAlmostEqual(calculate_plog_rate(plog_entries, T_test, 100.0), k2_val, delta=k2_val*1e-5)
+
+        # Test P_target <= 0
+        self.assertIsNone(calculate_plog_rate(plog_entries, T_test, 0.0))
+        self.assertIsNone(calculate_plog_rate(plog_entries, T_test, -1.0))
+        
+        # Test T <= 0
+        self.assertIsNone(calculate_plog_rate(plog_entries, 0.0, 5.0))
+        self.assertIsNone(calculate_plog_rate(plog_entries, -100.0, 5.0))
+
+        # Test with invalid pressure in PLOG entries
+        plog_invalid_pressure = [
+            {'pressure': -1.0, 'A': 1e10, 'n': 0, 'Ea': 1.0, 'units': 'KCAL/MOLE'},
+            plog_entries[1] # Valid entry
+        ]
+        # Should use only the valid entry (k2_val at P=10) if P_target is closer to it or exact
+        self.assertAlmostEqual(calculate_plog_rate(plog_invalid_pressure, T_test, 10.0), k2_val, delta=k2_val*1e-5)
+        
+        plog_zero_pressure = [
+            {'pressure': 0.0, 'A': 1e10, 'n': 0, 'Ea': 1.0, 'units': 'KCAL/MOLE'},
+            plog_entries[1]
+        ]
+        self.assertAlmostEqual(calculate_plog_rate(plog_zero_pressure, T_test, 10.0), k2_val, delta=k2_val*1e-5)
+
+
+        # Test with a single PLOG entry
+        single_plog_entry = [plog_entries[0]]
+        self.assertAlmostEqual(calculate_plog_rate(single_plog_entry, T_test, 1.0), k1_val, delta=k1_val*1e-5)
+        # Extrapolation with single entry should return that entry's rate
+        self.assertAlmostEqual(calculate_plog_rate(single_plog_entry, T_test, 0.1), k1_val, delta=k1_val*1e-5)
+        self.assertAlmostEqual(calculate_plog_rate(single_plog_entry, T_test, 10.0), k1_val, delta=k1_val*1e-5)
+
+        # Test with duplicate pressure points in PLOG entries
+        # Current behavior: if pressures are identical, first one encountered after sort is used.
+        # If log_P are identical, unique_rates logic keeps the first one.
+        plog_duplicate_pressure = [
+            {'pressure': 1.0, 'A': 1e10, 'n': 0, 'Ea': 1.0, 'units': 'KCAL/MOLE'}, # k1_val
+            {'pressure': 1.0, 'A': 1e11, 'n': 0, 'Ea': 1.5, 'units': 'KCAL/MOLE'}, # Different rate params
+            {'pressure': 10.0, 'A': 1e12, 'n': 0, 'Ea': 2000.0, 'units': 'CAL/MOLE'} # k2_val
+        ]
+        # Rate at P=1.0 should be k1_val because it's the first one for P=1.0
+        self.assertAlmostEqual(calculate_plog_rate(plog_duplicate_pressure, T_test, 1.0), k1_val, delta=k1_val*1e-5)
+        
+        # Test with empty PLOG entries
+        self.assertIsNone(calculate_plog_rate([], T_test, 1.0))
+        
+        # Test with PLOG entries missing required keys
+        plog_missing_keys = [{'pressure': 1.0, 'A': 1e10}] # Missing n, Ea
+        self.assertIsNone(calculate_plog_rate(plog_missing_keys, T_test, 1.0))
 
     def test_calculate_troe_rate_new_structure(self):
         T = 1000.0  # K
@@ -138,8 +192,69 @@ class TestRateCalculatorNew(unittest.TestCase):
         }
         self.assertIsNone(calculate_troe_rate(troe_data_no_coeffs, T, P_target, None))
 
+        # Test with M_conc provided directly
+        M_conc_direct = 0.05 # mol/cm^3, arbitrary value
+        # Recalculate Pr_exp and k_expected with M_conc_direct
+        k_inf_val_exp_direct = 1.0E14 * np.exp(-2000.0 / (R_cal * T)) # Same k_inf
+        k0_val_exp_direct = 1.0E16 * np.exp(-500.0 / (R_cal * T))   # Same k0
+        k0_eff_exp_direct = k0_val_exp_direct * M_conc_direct
+        Pr_exp_direct = k0_eff_exp_direct / k_inf_val_exp_direct
+        
+        alpha_d, T3s_d, T1s_d, T2s_d = troe_data1['coeffs'] # Use same coeffs as troe_data1
+        F_cent_exp_direct = (1 - alpha_d) * np.exp(-T / T3s_d) + alpha_d * np.exp(-T / T1s_d) + np.exp(-T / T2s_d)
+        
+        log10_Pr_exp_direct = np.log10(Pr_exp_direct)
+        c_exp_direct = -0.4 - 0.67 * log10_Pr_exp_direct
+        n_exp_direct = 0.75 - 1.27 * log10_Pr_exp_direct
+        val_exp_direct = log10_Pr_exp_direct - c_exp_direct
+        denom_exp_direct = n_exp_direct - 0.14 * val_exp_direct
+        F_exp_direct = 10**(np.log10(F_cent_exp_direct) / (1.0 + (val_exp_direct / denom_exp_direct)**2))
+        
+        k_expected_direct_M = k_inf_val_exp_direct * (Pr_exp_direct / (1 + Pr_exp_direct)) * F_exp_direct
+        k_calc_direct_M = calculate_troe_rate(troe_data1, T, P_target=999, M_conc=M_conc_direct) # P_target should be ignored
+        self.assertAlmostEqual(k_calc_direct_M, k_expected_direct_M, delta=k_expected_direct_M * 1e-5)
 
-if __name__ == '__main__':
-    unittest.main(argv=['first-arg-is-ignored'], exit=False)
+        # Test with P_target = 0 (when M_conc is None)
+        # This should result in M_conc = 0, so k0_eff = 0, Pr = 0.
+        # When Pr = 0, F is typically 1 (or can be, depending on Pr range for F formula).
+        # k = k_inf * (0 / (1+0)) * F = 0
+        self.assertAlmostEqual(calculate_troe_rate(troe_data1, T, P_target=0, M_conc=None), 0.0, places=8)
 
-```
+        # Test with P_target < 0 (when M_conc is None) -> should return None based on current code structure
+        self.assertIsNone(calculate_troe_rate(troe_data1, T, P_target=-1.0, M_conc=None))
+
+
+        # Test with T <= 0
+        self.assertIsNone(calculate_troe_rate(troe_data1, 0, P_target, M_conc=None))
+        self.assertIsNone(calculate_troe_rate(troe_data1, -100, P_target, M_conc=None))
+
+        # Test with invalid Troe coefficients
+        troe_invalid_coeffs1 = {**troe_data1, 'coeffs': [0.6, 0.0, 1200.0]} # T3star = 0
+        self.assertIsNone(calculate_troe_rate(troe_invalid_coeffs1, T, P_target, None))
+        
+        troe_invalid_coeffs2 = {**troe_data1, 'coeffs': [0.6, 200.0, -100.0]} # T1star < 0
+        self.assertIsNone(calculate_troe_rate(troe_invalid_coeffs2, T, P_target, None))
+
+        # Test with non-positive T2star (optional 4th coeff) - should still run if T2star is None or not there
+        # If T2star is present and non-positive, it might cause issues if not handled in main code.
+        # The main code has: if len(troe_coeffs) >= 4 and troe_coeffs[3] is not None: T2star = troe_coeffs[3]
+        # if T2star > 0: F_cent += np.exp(-T / T2star)
+        # So a non-positive T2star (if present) means it's not added to F_cent. This is fine.
+        troe_non_positive_T2s = {
+            'k_inf': {'A': 1.0E14, 'n': 0.0, 'Ea': 2.0, 'units': 'KCAL/MOLE'},
+            'k0': {'A': 1.0E16, 'n': 0.0, 'Ea': 500.0, 'units': 'CAL/MOLE'},
+            'coeffs': [0.6, 200.0, 1200.0, -50.0] # T2star < 0
+        }
+        # This should run, as -50.0 for T2star means the term np.exp(-T / T2star) is not added.
+        # Let's calculate without the T2s term from troe_data1
+        alpha_noT2s, T3s_noT2s, T1s_noT2s, _ = troe_data1['coeffs']
+        F_cent_exp_noT2s = (1 - alpha_noT2s) * np.exp(-T / T3s_noT2s) + alpha_noT2s * np.exp(-T / T1s_noT2s)
+        log10_Pr_exp_noT2s = np.log10(Pr_exp) # Pr_exp from original troe_data1 calculation at P_target=1
+        c_exp_noT2s = -0.4 - 0.67 * log10_Pr_exp_noT2s
+        n_exp_noT2s = 0.75 - 1.27 * log10_Pr_exp_noT2s
+        val_exp_noT2s = log10_Pr_exp_noT2s - c_exp_noT2s
+        denom_exp_noT2s = n_exp_noT2s - 0.14 * val_exp_noT2s
+        F_exp_noT2s = 10**(np.log10(F_cent_exp_noT2s) / (1.0 + (val_exp_noT2s / denom_exp_noT2s)**2))
+        k_expected_noT2s = k_inf_val_exp * (Pr_exp / (1 + Pr_exp)) * F_exp_noT2s
+        self.assertAlmostEqual(calculate_troe_rate(troe_non_positive_T2s, T, P_target, None), k_expected_noT2s, delta=k_expected_noT2s*1e-5)
+

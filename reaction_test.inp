@@ -1,0 +1,86 @@
+CH2OH+O2=CH2O+HO2    7.200E+13	0.000	3.736E+03
+    DUP
+CH2OH+O2=CH2O+HO2    2.9E16 -1.5 0.0E0
+    DUP
+!\Author: SP !\Ref: XU K XU ZF LIN MC MOL PHYS 105 !\Comment: WARNING
+CH2OH+H=CH2O+H2    4.0E6 1.86 1.47E2
+CH2OH+HO2=HOCHO+H2O    3.59901E12 0.12 4.54E2
+!\Author: WARNING !\Ref: NORTON, T.S ET AL., IJCK.(1991). !\Comment: WARNING
+CH2OH+HO2=CH2O+H2O2    1.2E13 0.0 0.0E0
+CH2OH+CH3O2=CH3O+HOCH2O    6.34262301E8 0.89 -2.485E3
+CH2OH+CH3O2=CH3OH+HOCHO    2.32688796E0 2.74 -3.566E3
+CH2OH+CH3O2=CH2O+CH3O2H    6.18751523E-1 2.69 -3.428E3
+!\Author: WARNING !\Ref: NORTON, T.S ET AL., IJCK.(1991). !\Comment: WARNING
+CH2OH+CH3O=CH2O+CH3OH    2.4E13 0.0 0.0E0
+!\Author: WARNING !\Ref: TSANG, JPC REF. DATA, 16 !\Comment: WARNING
+CH2OH+OH=H2O+CH2O    2.4E13 0.0 0.0E0
+!\Author: WARNING !\Ref: TSANG, JPC REF. DATA, 16 !\Comment: WARNING
+CH2OH+O=OH+CH2O    4.2E13 0.0 0.0E0
+!\Author: WARNING !\Ref: TSANG, JPC REF. DATA, 16 !\Comment: WARNING
+2CH2OH=CH2O+CH3OH    3.0E12 0.0 0.0E0
+!___________________________________________________________________________________________________________ 
+!\REACTIONCLASS: R+HO2<=>PRODUCTS
+!___________________________________________________________________________________________________________ 
+CH2OH+HO2<=>HOCH2O+OH                             +1.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: CURRAN ESTIMATE !\Comment: WARNING 
+!===========================================================================================================
+!\ENDSUBSPECIES: CH2OH
+!===========================================================================================================
+!===========================================================================================================
+!\SUBSPECIES: CH3O
+!===========================================================================================================
+!___________________________________________________________________________________________________________ 
+!\REACTIONCLASS: R+R<=>RH+RH
+!___________________________________________________________________________________________________________ 
+CH3O+O2<=>CH2O+HO2                                +2.17000000E+010 +0.00000000E+000 +1.74870000E+003 !\Author: UB !\Ref: BAULCH ET AL. J. PHYS. CHEM. REF. DATA, 34(2005) 757 !\Comment: WARNING 
+CH3O+H<=>CH2O+H2                                  +2.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: HOYERMANN ET AL., 18TH SYMPOSIUM !\Comment: WARNING 
+CH3O+HO2<=>CH2O+H2O2                              +3.01000000E+011 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: TSANG AND HAMPSON, J. PHYS. CHEM. REF. DATA, 15 !\Comment: WARNING 
+CH3O+CH3<=>CH2O+CH4                               +1.20000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: WARNING !\Comment: WARNING 
+2CH3O=CH3OH+CH2O    1.44E5 2.45 -2.26E3
+!===========================================================================================================
+!\ENDSUBSPECIES: CH3O
+!===========================================================================================================
+!===========================================================================================================
+!\SUBSPECIES: HCOH
+!===========================================================================================================
+!___________________________________________________________________________________________________________ 
+!\REACTIONCLASS: R+R<=>PRODUCTS
+!___________________________________________________________________________________________________________ 
+HCOH+O2=>CO2+H+OH                                 +5.00000000E+012 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+HCOH+O2<=>CO2+H2O                                 +3.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+HCOH+O=>CO2+H+H                                   +5.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+HCOH+O=>CO+OH+H                                   +3.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+HCOH+H<=>CH2O+H                                   +2.00000000E+014 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+HCOH+OH<=>HCO+H2O                                 +2.00000000E+013 +0.00000000E+000 +0.00000000E+000 !\Author: WARNING !\Ref: MARINOV 1996 !\Comment: WARNING 
+!===========================================================================================================
+!\ENDSUBSPECIES: HCOH
+!===========================================================================================================
+!----------------------------------------------------------------------------------------------------------------------------------
+!\ENDSUBMECH: CH3OH
+!----------------------------------------------------------------------------------------------------------------------------------
+!----------------------------------------------------------------------------------------------------------------------------------
+!\SUBMECH: CH2O
+!\MECHCOMMENTS: THE REACTION OCHO+OH<=>HO2CHO SEEMS TO BE A DEAD END OF SORTS, HO2CHO HAS A LIMITED SET OF CONSUMPTION / CROSS-REACTIONS(KPS, 28 / 06 / 2015)
+!\MECHCOMMENTS: THE REACTION SEQUENCE H+CO2<=>OCHO=>PRODUCTS MEANS THAT THE THE CO / CH2O MECHANISMS ARE INEXTRICABLY LINKED "IN THEORY". I AM NOT SURE ABOUT "IN PRACTICE".(KPS, 28 / 06 / 2015)
+!----------------------------------------------------------------------------------------------------------------------------------
+!___________________________________________________________________________________________________________ 
+!\REACTIONCLASS: RH<=>PRODUCTS
+!___________________________________________________________________________________________________________ 
+HCO+H(+M)<=>CH2O(+M)                              +1.09000000E+012 +4.80000000E-001 -2.60000000E+002 !\Author: WARNING !\Ref: LASKIN ET AL. IJCK 32 589-614 2000 !\Comment: WARNING 
+LOW /                                             +1.35000000E+024 -2.57000000E+000 +1.42500000E+003 /
+TROE /                           +7.82400000E-001 +2.71000000E+002 +2.75500000E+003 +6.57000000E+003 /
+CO+H2(+M)<=>CH2O(+M)                              +4.30000000E+007 +1.50000000E+000 +7.96000000E+004 !\Author: WARNING !\Ref: LASKIN ET AL. IJCK 32 589-614 2000 !\Comment: WARNING 
+LOW /                                             +5.07000000E+027 -3.42000000E+000 +8.43480000E+004 /
+TROE /                           +9.32000000E-001 +1.97000000E+002 +1.54000000E+003 +1.03000000E+004 /
+!___________________________________________________________________________________________________________ 
+!\REACTIONCLASS: RH+R_ABSTRACTION
+!___________________________________________________________________________________________________________ 
+CH2O+O2<=>HCO+HO2                                 +8.07000000E+015 +0.00000000E+000 +5.34200000E+004 !\Author: WARNING !\Ref: N. K. SRINIVASAN ET AL.,J. PHYS. CHEM. A 109, 7902-7914(2005) !\Comment: WARNING 
+CH2O+O<=>HCO+OH                                   +6.26000000E+009 +1.15000000E+000 +2.26000000E+003 !\Author: WARNING !\Ref: CURRAN FIT TO NIST DATABASE !\Comment: WARNING 
+CH2O+H<=>HCO+H2                                   +1.06911540E+005 +2.73093000E+000 +1.88714000E+003 !\Author: UB !\Ref: S.WANG ET AL. J.PHYS.CHEM.A, 118(2014) 10201-10209 !\Comment: RE-FIT TO INCLUDE BRANCHING RATIO TO PROMPT PATHWAY 
+CH2O+OH<=>HCO+H2O                                 +2.18500000E+009 +1.17820000E+000 -5.76020000E+002 !\Author: UB !\Ref: V. VASUDEVAN ET AL. IJCK. 37 !\Comment: RE-FIT TO REMOVE NEGATIVE A-FACTOR BUT RETAIN BRANCHING RATIO TO PROMPT PATHWAY 
+CH2O+HO2<=>HCO+H2O2                               +7.10000000E-003 +4.51700000E+000 +6.58000000E+003 !\Author: UB/HJC !\Ref: ROBERTSON, S. H.; SEAKINS, P. W.; PILLING, M. J. CHEMICAL KINETICS, IN PILLING, M. J., ED.; ELSEVIER !\Comment: WARNING 
+CH2O+CH3<=>HCO+CH4                                +2.93000000E-002 +4.30000000E+000 +2.83100000E+003 !\Author: UB !\Ref: NIST FIT TO AVAILABLE EXP. 26-02-2018 !\Comment: WARNING 
+CH2O+O2CHO<=>HCO+HO2CHO                           +1.99000000E+012 +0.00000000E+000 +1.16600000E+004 !\Author: WARNING !\Ref: ANALOGY WITH CH3O2+CH2O TSANG / HAMPSON 1986 !\Comment: WARNING 
+CH2O+OCHO<=>HCO+HOCHO                             +5.60000000E+012 +0.00000000E+000 +1.36000000E+004 !\Author: WARNING !\Ref: CURRAN ESTIMATE !\Comment: WARNING 
+CH2O+CH3O<=>HCO+CH3OH                             +6.62000000E+011 +0.00000000E+000 +2.29400000E+003 !\Author: WARNING !\Ref: FITTSCHEN, C., J. CHIM. PHYS. 95 !\Comment: WARNING 
+CH2O+CH3O2<=>HCO+CH3O2H                           +1.99000000E+012 +0.00000000E+000 +1.16600000E+004 !\Author: WARNING !\Ref: TSANG AND HAMPSON, J. PHYS. CHEM. REF. DATA, 15 !\Comment: WARNING 

@@ -18,9 +18,20 @@ def _convert_ea_to_cal_per_mol(Ea_original, units_str):
         return Ea_original
     elif units_str_norm == 'KCAL/MOLE':
         return Ea_original * 1000.0
-    elif units_str_norm in ['J/MOL', 'JOULES/MOL', 'JOULE/MOLE']: # Added JOULE/MOLE
+
+    # Explicitly check for the failing test cases' exact strings first
+    if units_str_norm == 'JOULES/MOLE':
         return Ea_original / 4.184
-    elif units_str_norm in ['KJ/MOL', 'KJOULES/MOL', 'KJOULE/MOLE']: # Added KJOULE/MOLE
+    if units_str_norm == 'KJOULES/MOLE':
+        return (Ea_original * 1000.0) / 4.184
+
+    # Then, try the general list approach (retaining the previous fix attempt for broader compatibility)
+    joules_options = ['J/MOL', 'JOULES/MOL', 'JOULE/MOLE'] # 'JOULES/MOLE' is repeated here, but it's fine
+    kjoules_options = ['KJ/MOL', 'KJOULES/MOL', 'KJOULE/MOLE'] # 'KJOULES/MOLE' is repeated, fine
+
+    if units_str_norm in joules_options:
+        return Ea_original / 4.184
+    elif units_str_norm in kjoules_options:
         return (Ea_original * 1000.0) / 4.184
     elif units_str_norm == 'KELVINS' or units_str_norm == 'K':
         return Ea_original * R_cal

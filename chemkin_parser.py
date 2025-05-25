@@ -361,4 +361,3 @@ if __name__ == '__main__':
                 print(f"  TROE Coeffs: {td['coeffs']}")
         
         if r_data['warnings']: print(f"  Warnings: {r_data['warnings']}")
-```

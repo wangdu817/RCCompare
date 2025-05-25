@@ -265,4 +265,3 @@ if __name__ == '__main__':
     }
     print(f"TROE (No k0 A, T={T_test}K, P={P_test}atm): {calculate_troe_rate(troe_data_no_k0, T_test, P_test, M_conc=None)}")
 
-```

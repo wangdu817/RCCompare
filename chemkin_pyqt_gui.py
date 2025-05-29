@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QTextEdit, 
     QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, 
     QTableWidget, QTableWidgetItem, QStatusBar, QSplitter, QGroupBox,
-    QHeaderView 
+    QHeaderView, QCheckBox
 )
 from PyQt6.QtCore import Qt
 import numpy as np

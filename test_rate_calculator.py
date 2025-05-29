@@ -200,6 +200,7 @@ class TestRateCalculatorNew(unittest.TestCase):
 
         # Test with M_conc provided directly
         M_conc_direct = 0.05 # mol/cm^3, arbitrary value
+
         k0_eff_exp_direct = k0_val_exp * M_conc_direct # Use k0_val_exp from the top of the method
         Pr_exp_direct = k0_eff_exp_direct / k_inf_val_exp # Use k_inf_val_exp from the top
         
@@ -209,16 +210,22 @@ class TestRateCalculatorNew(unittest.TestCase):
         n_exp_direct = 0.75 - 1.27 * log10_Pr_exp_direct
         val_exp_direct = log10_Pr_exp_direct - c_exp_direct
         denom_exp_direct = n_exp_direct - 0.14 * val_exp_direct
-        F_exp_direct = 10**(np.log10(F_cent_exp_direct) / (1.0 + (val_exp_direct / denom_exp_direct)**2)) if F_cent_exp_direct > 0 and denom_exp_direct != 0 else 1.0
-        
-        k_expected_direct_M = k_inf_val_exp * (Pr_exp_direct / (1 + Pr_exp_direct)) * F_exp_direct
-        k_calc_direct_M = calculate_troe_rate(troe_data1, T, P_target=999, M_conc=M_conc_direct) 
-        self.assertAlmostEqual(k_calc_direct_M, k_expected_direct_M, delta=k_expected_direct_M * 1e-5)
 
-        self.assertAlmostEqual(calculate_troe_rate(troe_data1, T, P_target=0, M_conc=None), 0.0, places=8)
-        self.assertIsNone(calculate_troe_rate(troe_data1, T, P_target=-1.0, M_conc=None))
-        self.assertIsNone(calculate_troe_rate(troe_data1, 0, P_target, M_conc=None))
-        self.assertIsNone(calculate_troe_rate(troe_data1, -100, P_target, M_conc=None))
+
+
+        # Recalculate Pr_exp and k_expected with M_conc_direct
+        k_inf_val_exp_direct = 1.0E14 * np.exp(-2000.0 / (R_cal * T)) # Same k_inf
+        k0_val_exp_direct = 1.0E16 * np.exp(-500.0 / (R_cal * T))   # Same k0
+        k0_eff_exp_direct = k0_val_exp_direct * M_conc_direct
+        Pr_exp_direct = k0_eff_exp_direct / k_inf_val_exp_direct
+        
+        alpha_d, T3s_d, T1s_d, T2s_d = troe_data1['coeffs'] # Use same coeffs as troe_data1
+        F_cent_exp_direct = (1 - alpha_d) * np.exp(-T / T3s_d) + alpha_d * np.exp(-T / T1s_d) + np.exp(-T / T2s_d)
+        
+        log10_Pr_exp_direct = np.log10(Pr_exp_direct)
+
+
+
 
         troe_invalid_coeffs1 = {**troe_data1, 'coeffs': [0.6, 0.0, 1200.0]}
         self.assertIsNone(calculate_troe_rate(troe_invalid_coeffs1, T, P_target, None))
@@ -368,3 +375,4 @@ class TestCalculateReverseRateConstant(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

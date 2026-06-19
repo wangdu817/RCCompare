@@ -123,7 +123,7 @@ def read_nasa_polynomials(filepath):
             lines_for_current_species = [line_full]
             current_species_data['coeff_lines_raw'] = [] # To store next 3 lines
 
-        elif current_species_data and 'coeff_lines_raw' in current_species_data and (len(line) < 79 or line[79] in ['2', '3', '4']):
+        elif current_species_data and (len(line) < 79 or line[79] in ['2', '3', '4']):
             # Coefficient lines (Lines 2, 3, 4 of a species entry)
             lines_for_current_species.append(line_full)
             current_species_data['coeff_lines_raw'].append(line.strip()) # Store the content of lines 2,3,4

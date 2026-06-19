@@ -1,3 +1,5 @@
 PyQt6
 matplotlib
 numpy
+pandas
+openpyxl

@@ -299,33 +299,39 @@ def calculate_plog_rate(plog_entries_list, T, P_target):
     if P_target <= 0: return None
     if not plog_entries_list: return None
 
-    rates_by_pressure = {}
+    rates_at_T = []
     for entry in plog_entries_list:
         if not all(k in entry for k in ['pressure', 'A', 'n', 'Ea']):
             # print(f"Warning: Invalid PLOG entry, missing keys: {entry}")
             continue
-
+        
         pressure_val = entry['pressure']
         if pressure_val <= 0: continue
 
         # Each PLOG entry is an arrhenius_params_dict
-        ki = calculate_arrhenius_rate(entry, T)
-
+        ki = calculate_arrhenius_rate(entry, T) 
+        
         if ki is None or ki < 0: continue
 
-        if ki == 0.0 or ki > 0:
-            rates_by_pressure[pressure_val] = rates_by_pressure.get(pressure_val, 0.0) + ki
-
-    rates_at_T = []
-    for pressure_val, k_total in rates_by_pressure.items():
-        if k_total == 0.0:
-            rates_at_T.append({'log_P': np.log(pressure_val), 'log_k': -np.inf, 'k': 0.0})
-        elif k_total > 0:
-            rates_at_T.append({'log_P': np.log(pressure_val), 'log_k': np.log(k_total), 'k': k_total})
+        if ki == 0.0 and pressure_val > 0 :
+             rates_at_T.append({'log_P': np.log(pressure_val), 'log_k': -np.inf, 'k': 0.0})
+        elif ki > 0 :
+            rates_at_T.append({'log_P': np.log(pressure_val), 'log_k': np.log(ki), 'k': ki})
 
     if not rates_at_T: return None
     rates_at_T.sort(key=lambda x: x['log_P'])
 
+    if len(rates_at_T) == 1: return rates_at_T[0]['k']
+
+    unique_rates = []
+    if rates_at_T:
+        unique_rates.append(rates_at_T[0])
+        for i in range(1, len(rates_at_T)):
+            if not np.isclose(rates_at_T[i]['log_P'], rates_at_T[i-1]['log_P']):
+                unique_rates.append(rates_at_T[i])
+    rates_at_T = unique_rates
+
+    if not rates_at_T: return None
     if len(rates_at_T) == 1: return rates_at_T[0]['k']
 
     log_P_target = np.log(P_target)
@@ -343,7 +349,7 @@ def calculate_plog_rate(plog_entries_list, T, P_target):
             P_low_entry = rates_at_T[i]
             P_high_entry = rates_at_T[i+1]
             break
-
+    
     if P_low_entry is None or P_high_entry is None :
         min_dist = float('inf'); closest_k = None
         for entry_u in rates_at_T:
@@ -355,7 +361,7 @@ def calculate_plog_rate(plog_entries_list, T, P_target):
     log_P2, log_k2 = P_high_entry['log_P'], P_high_entry['log_k']
 
     if log_P1 == log_P2: return P_low_entry['k']
-
+    
     log_k_target = np.interp(log_P_target, [log_P1, log_P2], [log_k1, log_k2])
 
     if log_k_target == -np.inf: return 0.0

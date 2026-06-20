@@ -1,5 +1,4 @@
 import numpy as np
-import math # For np.exp, math.log if needed, though np usually handles it.
 
 # Assuming thermo_calculator.py is accessible
 try:
@@ -14,7 +13,6 @@ R_atm_cm3 = 82.057 # Gas constant in cm^3*atm/mol-K
 
 # Constants for reverse rate calculation
 R_J_MOL_K = 8.314462618       # Gas constant in J/mol-K
-P_ATM_PA = 101325.0           # Standard pressure in Pascals (1 atm)
 R_L_ATM_MOL_K = 0.08205736608 # Gas constant in L*atm/mol-K
 
 

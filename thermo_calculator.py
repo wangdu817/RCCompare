@@ -4,20 +4,6 @@ import numpy as np # For T^2, T^3, T^4 in polynomial calculations
 # Gas constant in J/mol-K
 R_J_MOL_K = 8.31446261815324
 
-def get_nasa_polynomial(species_name, thermo_data_dict):
-    """
-    Retrieves the polynomial data for a given species.
-
-    Args:
-        species_name (str): Name of the species (case-insensitive).
-        thermo_data_dict (dict): Dictionary of thermo data from read_nasa_polynomials.
-
-    Returns:
-        dict: The specific species data dictionary containing 'T_ranges', 
-              'coeffs', etc., or None if species not found.
-    """
-    return thermo_data_dict.get(species_name.upper())
-
 def calculate_cp_h_s(T_kelvin, species_coeffs):
     """
     Calculates Cp/R, H/RT, S/R and subsequently Cp, H, S for a given
@@ -89,7 +75,7 @@ def get_thermo_properties(species_name, T_kelvin, thermo_data_dict):
         tuple: (H_J_mol, S_J_mol_K, G_J_mol, Cp_J_mol_K)
                Returns (None, None, None, None) if species not found or T is out of range.
     """
-    species_data = get_nasa_polynomial(species_name, thermo_data_dict)
+    species_data = thermo_data_dict.get(species_name.upper())
     if not species_data:
         # print(f"Warning: Species '{species_name}' not found in thermo data.")
         return None, None, None, None

@@ -1,20 +1,20 @@
 import sys
 import os
+import re
 import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QTextEdit,
     QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
     QTableWidget, QTableWidgetItem, QStatusBar, QSplitter, QGroupBox,
     QHeaderView, QCheckBox, QDialog, QDialogButtonBox, QSizePolicy,
-    QScrollArea, QMenuBar, QMessageBox, QFileDialog, QMenu
+    QMenuBar, QMessageBox, QFileDialog, QMenu
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty, QRect
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut, QPainter, QPen
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 
 # For Excel export
@@ -36,13 +36,14 @@ try:
         calculate_reverse_rate_constant,
         merge_duplicate_reactions, calculate_merged_duplicate_rate
     )
-    from thermo_parser import read_nasa_polynomials, append_nasa_polynomial_from_string, is_valid_nasa_polynomial_string
+    from thermo_parser import read_nasa_polynomials, append_nasa_polynomial_from_string, is_valid_nasa_polynomial_string, reload_thermo_if_changed
 except ImportError as e:
     print(f"Error importing modules: {e}")
     parse_chemkin_mechanism = None
     read_nasa_polynomials = None
     append_nasa_polynomial_from_string = None
     is_valid_nasa_polynomial_string = None
+    reload_thermo_if_changed = None
     calculate_arrhenius_rate = None
     calculate_plog_rate = None
     calculate_troe_rate = None
@@ -388,7 +389,12 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._apply_embedded_stylesheet()
 
     def _apply_embedded_stylesheet(self):
-        """应用内嵌的样式表（用于打包后的程序）"""
+        """Apply embedded fallback stylesheet (simplified version of modern_style.qss).
+
+        This is used only when the external modern_style.qss file is not found
+        (e.g., if it was not bundled with the executable). The full production
+        stylesheet is maintained in modern_style.qss.
+        """
         stylesheet = """
         /* Modern Dark Theme */
         QMainWindow, QWidget, QDialog {
@@ -698,11 +704,16 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
     def _reload_thermo_data_if_changed(self):
         """Reload persistent thermo data once an external save changes the file."""
-        current_signature = get_thermo_file_signature(self.thermo_filepath)
-        if current_signature == getattr(self, "_thermo_file_signature", None):
+        if not reload_thermo_if_changed:
             return False
-        self._load_thermo_data()
-        return True
+        new_data, new_sig, changed = reload_thermo_if_changed(
+            self.thermo_filepath, self.thermo_data, self._thermo_file_signature
+        )
+        if changed:
+            self.thermo_data = new_data
+            self._thermo_file_signature = new_sig
+            self.statusBar.showMessage(f"Thermo data reloaded: {len(new_data)} species.")
+        return changed
 
     def _calculate_rate_for_reaction(self, reaction_data, T, P_atm):
         k = None
@@ -732,7 +743,32 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             k = None
         return k
 
+    def _calculate_rate_array(self, reaction_data, T_array, P_atm):
+        """Vectorized rate calculation for an array of temperatures (used for plotting)."""
+        reaction_type = reaction_data.get('reaction_type', 'ARRHENIUS')
+
+        # Fast path: fully vectorized Arrhenius
+        if reaction_type == 'ARRHENIUS' and reaction_data.get('arrhenius_params'):
+            params = reaction_data['arrhenius_params']
+            A = params.get('A')
+            n = params.get('n')
+            Ea = params.get('Ea')
+            if A is not None and n is not None and Ea is not None:
+                from rate_calculator import _convert_ea_to_cal_per_mol, R_cal
+                Ea_cal = _convert_ea_to_cal_per_mol(Ea, params.get('units'))
+                with np.errstate(over='ignore', divide='ignore', invalid='ignore'):
+                    k_arr = A * (T_array ** n) * np.exp(-Ea_cal / (R_cal * T_array))
+                return k_arr
+
+        # Fallback: scalar loop for PLOG, TROE, DUP, etc.
+        k_list = []
+        for T_val in T_array:
+            k_val = self._calculate_rate_for_reaction(reaction_data, T_val, P_atm)
+            k_list.append(k_val if k_val is not None and k_val > 1e-100 else np.nan)
+        return np.array(k_list)
+
     def _update_rate_constant_table(self, parsed_reactions):
+        self.rate_table_widget.setUpdatesEnabled(False)
         self.rate_table_widget.setRowCount(0)
         
         P_plot_values, use_pressure_range_plotting, P_default = self._get_plot_pressure_settings()
@@ -835,6 +871,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 
                 current_row += 1
 
+        self.rate_table_widget.setUpdatesEnabled(True)
         self.rate_table_widget.resizeColumnsToContents()
 
     def _on_calc_reverse_checkbox_changed(self, state, reaction_data, reaction_index):
@@ -1091,19 +1128,17 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
             if use_pressure_range_plotting and reaction_type in ['PLOG', 'TROE']:
                 for pressure_index, P_val in enumerate(P_plot_values):
-                    k_values_log10 = []
-                    for T_val in T_values:
-                        if is_calculating_reverse:
-                            # 计算逆反应速率
+                    if is_calculating_reverse:
+                        k_values_log10 = []
+                        for T_val in T_values:
                             k = self._calculate_reverse_rate_for_plot(reaction_data, T_val, P_val)
-                        else:
-                            # 计算正反应速率
-                            k = self._calculate_rate_for_reaction(reaction_data, T_val, P_val)
-                        
-                        if k is not None and k > 1e-100:
-                            k_values_log10.append(np.log10(k))
-                        else:
-                            k_values_log10.append(np.nan)
+                            k_values_log10.append(np.log10(k) if k is not None and k > 1e-100 else np.nan)
+                    else:
+                        k_array = self._calculate_rate_array(reaction_data, T_values, P_val)
+                        k_values_log10 = np.where(
+                            (k_array != None) & ~np.isnan(k_array) & (k_array > 1e-100),
+                            np.log10(k_array), np.nan
+                        )
                     
                     if any(not np.isnan(val) for val in k_values_log10):
                         label_prefix = "kr" if is_calculating_reverse else "kf"
@@ -1112,18 +1147,18 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                         self.plot_axes.plot(x_values, k_values_log10, label=label, color=color, linestyle=linestyle)
                         num_lines_plotted += 1
             else:
-                k_values_log10 = []
                 current_P_for_plot = P_default
-                for T_val in T_values:
-                    if is_calculating_reverse:
+                if is_calculating_reverse:
+                    k_values_log10 = []
+                    for T_val in T_values:
                         k = self._calculate_reverse_rate_for_plot(reaction_data, T_val, current_P_for_plot)
-                    else:
-                        k = self._calculate_rate_for_reaction(reaction_data, T_val, current_P_for_plot)
-
-                    if k is not None and k > 1e-100:
-                        k_values_log10.append(np.log10(k))
-                    else:
-                        k_values_log10.append(np.nan)
+                        k_values_log10.append(np.log10(k) if k is not None and k > 1e-100 else np.nan)
+                else:
+                    k_array = self._calculate_rate_array(reaction_data, T_values, current_P_for_plot)
+                    k_values_log10 = np.where(
+                        (k_array != None) & ~np.isnan(k_array) & (k_array > 1e-100),
+                        np.log10(k_array), np.nan
+                    )
 
                 if any(not np.isnan(val) for val in k_values_log10):
                     label_prefix = "kr" if is_calculating_reverse else "kf"
@@ -1393,7 +1428,106 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         dialog.exec()
 
 
-class ExperimentalReverseRateDialog(QDialog):
+class TableExportMixin:
+    """Mixin providing table right-click menu, copy, and Excel export functionality."""
+
+    def _get_export_table(self):
+        """Subclasses must return the QTableWidget to operate on."""
+        raise NotImplementedError
+
+    def _get_export_info(self):
+        """Subclasses must return (default_filename, dialog_title) for export."""
+        raise NotImplementedError
+
+    def _show_context_menu(self, position):
+        """显示右键菜单"""
+        table = self._get_export_table()
+        menu = QMenu(self)
+
+        copy_action = QAction("复制", self)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.triggered.connect(self._copy_selection)
+        menu.addAction(copy_action)
+
+        select_all_action = QAction("全选", self)
+        select_all_action.setShortcut(QKeySequence.StandardKey.SelectAll)
+        select_all_action.triggered.connect(table.selectAll)
+        menu.addAction(select_all_action)
+
+        menu.exec(table.viewport().mapToGlobal(position))
+
+    def _copy_selection(self):
+        """复制选中的表格数据到剪贴板（包含表头）"""
+        table = self._get_export_table()
+        selection = table.selectedRanges()
+        if not selection:
+            return
+
+        min_row = min(r.topRow() for r in selection)
+        max_row = max(r.bottomRow() for r in selection)
+        min_col = min(r.leftColumn() for r in selection)
+        max_col = max(r.rightColumn() for r in selection)
+
+        copied_data = []
+
+        header_row = []
+        for col in range(min_col, max_col + 1):
+            header_item = table.horizontalHeaderItem(col)
+            header_text = header_item.text() if header_item else ""
+            header_row.append(header_text)
+        copied_data.append('\t'.join(header_row))
+
+        for row in range(min_row, max_row + 1):
+            row_data = []
+            for col in range(min_col, max_col + 1):
+                item = table.item(row, col)
+                cell_text = item.text() if item else ""
+                row_data.append(cell_text)
+            copied_data.append('\t'.join(row_data))
+
+        QApplication.clipboard().setText('\n'.join(copied_data))
+
+    def _export_to_excel(self):
+        """导出表格数据到Excel"""
+        if not PANDAS_AVAILABLE:
+            QMessageBox.warning(self, "导出失败", "需要安装pandas库才能导出Excel文件。")
+            return
+
+        table = self._get_export_table()
+        default_name, title = self._get_export_info()
+
+        if table.rowCount() == 0:
+            QMessageBox.warning(self, "导出失败", "没有可导出的数据，请先进行计算。")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, title, default_name,
+            "Excel files (*.xlsx);;All files (*.*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            table_data = []
+            for row in range(table.rowCount()):
+                row_data = {}
+                for col in range(table.columnCount()):
+                    header = table.horizontalHeaderItem(col).text()
+                    item = table.item(row, col)
+                    row_data[header] = item.text() if item else ""
+                table_data.append(row_data)
+
+            df = pd.DataFrame(table_data)
+            df.to_excel(file_path, index=False)
+
+            QMessageBox.information(self, "导出成功", f"数据已成功导出到:\n{file_path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"导出Excel文件时发生错误:\n{str(e)}")
+
+
+class ExperimentalReverseRateDialog(TableExportMixin, QDialog):
     """功能5: 实验逆反应速率转换对话框"""
     def __init__(self, parent=None, thermo_data=None, thermo_filepath=None):
         super().__init__(parent)
@@ -1550,14 +1684,15 @@ class ExperimentalReverseRateDialog(QDialog):
 
     def _reload_thermo_data_if_changed(self):
         """Use externally saved persistent thermo entries on the next calculation."""
-        if not self.thermo_filepath:
+        if not reload_thermo_if_changed:
             return False
-        current_signature = get_thermo_file_signature(self.thermo_filepath)
-        if current_signature == self._thermo_file_signature:
-            return False
-        self.thermo_data = read_nasa_polynomials(self.thermo_filepath)
-        self._thermo_file_signature = current_signature
-        return True
+        new_data, new_sig, changed = reload_thermo_if_changed(
+            self.thermo_filepath, self.thermo_data, self._thermo_file_signature
+        )
+        if changed:
+            self.thermo_data = new_data
+            self._thermo_file_signature = new_sig
+        return changed
 
     def _calculate_for_temperature(self, reaction_data, T, kr_exp):
         """计算单个温度点的结果"""
@@ -1643,99 +1778,14 @@ class ExperimentalReverseRateDialog(QDialog):
         # 调整列宽
         self.result_table.resizeColumnsToContents()
 
-    def _show_context_menu(self, position):
-        """显示右键菜单"""
-        menu = QMenu(self)
+    def _get_export_table(self):
+        return self.result_table
 
-        copy_action = QAction("复制", self)
-        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
-        copy_action.triggered.connect(self._copy_selection)
-        menu.addAction(copy_action)
-
-        select_all_action = QAction("全选", self)
-        select_all_action.setShortcut(QKeySequence.StandardKey.SelectAll)
-        select_all_action.triggered.connect(self.result_table.selectAll)
-        menu.addAction(select_all_action)
-
-        menu.exec(self.result_table.viewport().mapToGlobal(position))
-
-    def _copy_selection(self):
-        """复制选中的表格数据到剪贴板（包含表头）"""
-        selection = self.result_table.selectedRanges()
-        if not selection:
-            return
-
-        # 获取选中区域的边界
-        min_row = min(r.topRow() for r in selection)
-        max_row = max(r.bottomRow() for r in selection)
-        min_col = min(r.leftColumn() for r in selection)
-        max_col = max(r.rightColumn() for r in selection)
-
-        # 构建复制内容（包含表头）
-        copied_data = []
-
-        # 添加表头行
-        header_row = []
-        for col in range(min_col, max_col + 1):
-            header_item = self.result_table.horizontalHeaderItem(col)
-            header_text = header_item.text() if header_item else ""
-            header_row.append(header_text)
-        copied_data.append('\t'.join(header_row))
-
-        # 添加数据行
-        for row in range(min_row, max_row + 1):
-            row_data = []
-            for col in range(min_col, max_col + 1):
-                item = self.result_table.item(row, col)
-                cell_text = item.text() if item else ""
-                row_data.append(cell_text)
-            copied_data.append('\t'.join(row_data))
-
-        # 复制到剪贴板
-        clipboard_text = '\n'.join(copied_data)
-        QApplication.clipboard().setText(clipboard_text)
-
-    def _export_to_excel(self):
-        """导出结果到Excel"""
-        if not PANDAS_AVAILABLE:
-            QMessageBox.warning(self, "导出失败", "需要安装pandas库才能导出Excel文件。")
-            return
-
-        if self.result_table.rowCount() == 0:
-            QMessageBox.warning(self, "导出失败", "没有可导出的数据，请先进行计算。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "保存实验逆反应速率转换结果",
-            "experimental_reverse_rate_conversion.xlsx",
-            "Excel files (*.xlsx);;All files (*.*)"
-        )
-
-        if not file_path:
-            return
-
-        try:
-            # 提取表格数据
-            table_data = []
-            for row in range(self.result_table.rowCount()):
-                row_data = {}
-                for col in range(self.result_table.columnCount()):
-                    header = self.result_table.horizontalHeaderItem(col).text()
-                    item = self.result_table.item(row, col)
-                    row_data[header] = item.text() if item else ""
-                table_data.append(row_data)
-
-            df = pd.DataFrame(table_data)
-            df.to_excel(file_path, index=False)
-
-            QMessageBox.information(self, "导出成功", f"数据已成功导出到:\n{file_path}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出Excel文件时发生错误:\n{str(e)}")
+    def _get_export_info(self):
+        return "experimental_reverse_rate_conversion.xlsx", "保存实验逆反应速率转换结果"
 
 
-class RateConstantDetailDialog(QDialog):
+class RateConstantDetailDialog(TableExportMixin, QDialog):
     """Dialog to show detailed rate constant data for all reactions"""
     def __init__(self, parsed_reactions, T_min, T_max, parent=None,
                  calc_rate_func=None, calc_reverse_func=None, get_pressure_func=None):
@@ -1864,92 +1914,11 @@ class RateConstantDetailDialog(QDialog):
         header = self.detail_table.horizontalHeader()
         header.setStretchLastSection(False)
 
-    def _show_context_menu(self, position):
-        """功能4: 显示右键菜单"""
-        menu = QMenu(self)
+    def _get_export_table(self):
+        return self.detail_table
 
-        copy_action = QAction("复制", self)
-        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
-        copy_action.triggered.connect(self._copy_selection)
-        menu.addAction(copy_action)
-
-        select_all_action = QAction("全选", self)
-        select_all_action.setShortcut(QKeySequence.StandardKey.SelectAll)
-        select_all_action.triggered.connect(self.detail_table.selectAll)
-        menu.addAction(select_all_action)
-
-        menu.exec(self.detail_table.viewport().mapToGlobal(position))
-
-    def _copy_selection(self):
-        """功能4: 复制选中的表格数据到剪贴板（包含表头）"""
-        selection = self.detail_table.selectedRanges()
-        if not selection:
-            return
-
-        # 获取选中区域的边界
-        min_row = min(r.topRow() for r in selection)
-        max_row = max(r.bottomRow() for r in selection)
-        min_col = min(r.leftColumn() for r in selection)
-        max_col = max(r.rightColumn() for r in selection)
-
-        # 构建复制内容（包含表头）
-        copied_data = []
-
-        # 添加表头行
-        header_row = []
-        for col in range(min_col, max_col + 1):
-            header_item = self.detail_table.horizontalHeaderItem(col)
-            header_text = header_item.text() if header_item else ""
-            header_row.append(header_text)
-        copied_data.append('\t'.join(header_row))
-
-        # 添加数据行
-        for row in range(min_row, max_row + 1):
-            row_data = []
-            for col in range(min_col, max_col + 1):
-                item = self.detail_table.item(row, col)
-                cell_text = item.text() if item else ""
-                row_data.append(cell_text)
-            copied_data.append('\t'.join(row_data))
-
-        # 复制到剪贴板
-        clipboard_text = '\n'.join(copied_data)
-        QApplication.clipboard().setText(clipboard_text)
-
-    def _export_to_excel(self):
-        """Export table data to Excel"""
-        if not PANDAS_AVAILABLE:
-            QMessageBox.warning(self, "导出失败", "需要安装pandas库才能导出Excel文件。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "保存详细速率常数数据",
-            "rate_constants_detail.xlsx",
-            "Excel files (*.xlsx);;All files (*.*)"
-        )
-
-        if not file_path:
-            return
-
-        try:
-            # 提取表格数据
-            table_data = []
-            for row in range(self.detail_table.rowCount()):
-                row_data = {}
-                for col in range(self.detail_table.columnCount()):
-                    header = self.detail_table.horizontalHeaderItem(col).text()
-                    item = self.detail_table.item(row, col)
-                    row_data[header] = item.text() if item else ""
-                table_data.append(row_data)
-
-            df = pd.DataFrame(table_data)
-            df.to_excel(file_path, index=False)
-
-            QMessageBox.information(self, "导出成功", f"数据已成功导出到:\n{file_path}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"导出Excel文件时发生错误:\n{str(e)}")
+    def _get_export_info(self):
+        return "rate_constants_detail.xlsx", "保存详细速率常数数据"
 
 
 def validate_nasa7_format(input_text):
@@ -1996,7 +1965,6 @@ def validate_nasa7_format(input_text):
             line1 = species_lines[0]
 
             # 使用正则表达式提取温度值，更灵活地处理不同格式
-            import re
             temp_pattern = r'[\d.]+(?:[eE][+-]?\d+)?'
             temp_matches = re.findall(temp_pattern, line1)
 

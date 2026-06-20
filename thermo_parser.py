@@ -1,4 +1,5 @@
 import re
+import os
 
 def _parse_coeff_line(line, num_coeffs):
     """
@@ -192,6 +193,36 @@ def read_nasa_polynomials(filepath):
         thermo_data[current_species_data['species_name'].upper()] = current_species_data
 
     return thermo_data
+
+
+def reload_thermo_if_changed(filepath, current_data, current_signature):
+    """Reload thermo data if the file has been modified externally.
+
+    Args:
+        filepath (str): Path to the thermo data file.
+        current_data (dict): Currently loaded thermo data dictionary.
+        current_signature: The previous (mtime_ns, size) signature.
+
+    Returns:
+        tuple: (new_data, new_signature, changed)
+            - new_data: Updated thermo dict if changed, otherwise original.
+            - new_signature: Updated signature if changed, otherwise original.
+            - changed (bool): True if data was reloaded.
+    """
+    if not filepath:
+        return current_data, current_signature, False
+    try:
+        stat_result = os.stat(filepath)
+        new_signature = stat_result.st_mtime_ns, stat_result.st_size
+    except OSError:
+        return current_data, current_signature, False
+
+    if new_signature == current_signature:
+        return current_data, current_signature, False
+
+    new_data = read_nasa_polynomials(filepath)
+    return new_data, new_signature, True
+
 
 def is_valid_nasa_polynomial_string(polynomial_string):
     """

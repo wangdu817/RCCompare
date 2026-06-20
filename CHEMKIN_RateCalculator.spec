@@ -5,7 +5,7 @@ a = Analysis(
     ['chemkin_pyqt_gui_simple.py'],
     pathex=[],
     binaries=[],
-    datas=[('logo.png', '.'), ('therm.dat', '.')],
+    datas=[('logo.png', '.'), ('therm.dat', '.'), ('modern_style.qss', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

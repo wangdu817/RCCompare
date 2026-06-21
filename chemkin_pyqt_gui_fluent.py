@@ -439,6 +439,9 @@ class MainWindow(FluentWindow):
 
         setTheme(Theme.DARK)
 
+        # Force dark theme on all child widgets
+        self._apply_global_dark_qss()
+
         # Load thermo data
         try:
             ensure_persistent_thermo_file(self.thermo_filepath,
@@ -457,10 +460,13 @@ class MainWindow(FluentWindow):
 
         # Left scroll panel
         scroll = SmoothScrollArea()
+        scroll.setObjectName("leftPanel")
         scroll.setFixedWidth(420)
         scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidgetResizable(True)
         lw = QWidget()
+        lw.setObjectName("leftPanelContent")
         ll = QVBoxLayout(lw)
         ll.setContentsMargins(16, 16, 16, 16)
         ll.setSpacing(12)
@@ -583,6 +589,160 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         lay.addWidget(ac)
         lay.addStretch()
 
+    # ── Global dark QSS ──────────────────────────────────────────────
+
+    def _apply_global_dark_qss(self, dark=True):
+        """Force dark/light theme on all standard Qt widgets that
+        QFluentWidgets' setTheme doesn't fully cover.
+
+        IMPORTANT: QSS type selectors match Qt C++ class names, NOT Python
+        class names.  e.g. SimpleCardWidget's Qt class is QFrame, BodyLabel's
+        is QLabel.  Always use Qt base class selectors.
+        """
+        if dark:
+            bg, card_bg, input_bg, fg, border, accent = (
+                '#2b2b2b', '#353535', '#3c3c3c', '#e0e0e0', '#4a4a4a', '#4a90e2')
+        else:
+            bg, card_bg, input_bg, fg, border, accent = (
+                '#f5f5f5', '#ffffff', '#ffffff', '#333333', '#e0e0e0', '#4a90e2')
+
+        qss = f"""
+            /* ── Left panel scroll area and content ── */
+            QScrollArea#leftPanel {{
+                background-color: {bg};
+                border: none;
+            }}
+            QWidget#leftPanelContent {{
+                background-color: {bg};
+            }}
+
+            /* ── Card-like widgets (QFrame is the Qt base for SimpleCardWidget) ── */
+            #leftPanelContent QFrame {{
+                background-color: {card_bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+
+            /* ── Labels ── */
+            #leftPanelContent QLabel {{
+                color: {fg};
+                background-color: transparent;
+            }}
+
+            /* ── Line edits ── */
+            QLineEdit {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 2px solid {border};
+                border-radius: 6px;
+                padding: 6px 10px;
+                selection-background-color: {accent};
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {accent};
+            }}
+
+            /* ── Text edits (PlainTextEdit is QPlainTextEdit in Qt) ── */
+            QPlainTextEdit {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 2px solid {border};
+                border-radius: 6px;
+                padding: 8px;
+                selection-background-color: {accent};
+                font-family: "Consolas", "Courier New", monospace;
+            }}
+            QPlainTextEdit:focus {{
+                border: 2px solid {accent};
+            }}
+
+            /* ── Checkboxes ── */
+            QCheckBox {{
+                color: {fg};
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px; height: 18px;
+                border: 2px solid {border};
+                border-radius: 4px;
+                background-color: {input_bg};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {accent};
+                border: 2px solid {accent};
+            }}
+
+            /* ── Combo boxes ── */
+            QComboBox {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 2px solid {border};
+                border-radius: 6px;
+                padding: 6px 10px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+
+            /* ── Push buttons (non-primary) ── */
+            #leftPanelContent QPushButton {{
+                background-color: {card_bg};
+                color: {fg};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }}
+            #leftPanelContent QPushButton:hover {{
+                background-color: {input_bg};
+                border: 1px solid {accent};
+            }}
+            #leftPanelContent QPushButton:pressed {{
+                background-color: {accent};
+                color: white;
+            }}
+            #leftPanelContent QPushButton:disabled {{
+                color: #666666;
+                border: 1px solid #444444;
+            }}
+
+            /* ── Scrollbars ── */
+            QScrollBar:vertical {{
+                background: {bg}; width: 12px; border-radius: 6px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #555555; border-radius: 6px; min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {accent};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar:horizontal {{
+                background: {bg}; height: 12px; border-radius: 6px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: #555555; border-radius: 6px; min-width: 30px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {accent};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0;
+            }}
+
+            /* ── Tooltips ── */
+            QToolTip {{
+                background-color: {card_bg};
+                color: {fg};
+                border: 1px solid {accent};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+        """
+        self.setStyleSheet(qss)
+
     # ── Notification helper ──────────────────────────────────────────
 
     def _info(self, msg, level="success", title=""):
@@ -594,6 +754,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
     def _on_theme_toggled(self, dark):
         setTheme(Theme.DARK if dark else Theme.LIGHT)
+        self._apply_global_dark_qss(dark)
         self.plot_card.apply_theme(dark)
         self.table_card.apply_theme(dark)
         if hasattr(self, 'parsed_reactions'):

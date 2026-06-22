@@ -601,10 +601,10 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         """
         if dark:
             bg, card_bg, input_bg, fg, border, accent = (
-                '#2b2b2b', '#353535', '#3c3c3c', '#e0e0e0', '#4a4a4a', '#4a90e2')
+                '#1a1d23', '#222630', '#2e3440', '#e8ecf4', '#3a3f4b', '#4a90e2')
         else:
             bg, card_bg, input_bg, fg, border, accent = (
-                '#f5f5f5', '#ffffff', '#ffffff', '#333333', '#e0e0e0', '#4a90e2')
+                '#f0f2f5', '#ffffff', '#f8f9fa', '#2c3e50', '#dce1e8', '#4a90e2')
 
         qss = f"""
             /* ── Left panel scroll area and content ── */
@@ -702,8 +702,8 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 color: white;
             }}
             #leftPanelContent QPushButton:disabled {{
-                color: #666666;
-                border: 1px solid #444444;
+                color: #5a6070;
+                border: 1px solid #3a3f4b;
             }}
 
             /* ── Scrollbars ── */
@@ -711,7 +711,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 background: {bg}; width: 12px; border-radius: 6px;
             }}
             QScrollBar::handle:vertical {{
-                background: #555555; border-radius: 6px; min-height: 30px;
+                background: #3a3f4b; border-radius: 6px; min-height: 30px;
             }}
             QScrollBar::handle:vertical:hover {{
                 background: {accent};
@@ -723,7 +723,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 background: {bg}; height: 12px; border-radius: 6px;
             }}
             QScrollBar::handle:horizontal {{
-                background: #555555; border-radius: 6px; min-width: 30px;
+                background: #3a3f4b; border-radius: 6px; min-width: 30px;
             }}
             QScrollBar::handle:horizontal:hover {{
                 background: {accent};

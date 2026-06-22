@@ -347,6 +347,16 @@ class RateTableCard(SimpleCardWidget):
         self._setup_columns(self.table_temperatures)
         lay.addWidget(self.table)
 
+        # Copy/paste support
+        self.table.setSelectionMode(
+            TableWidget.SelectionMode.ExtendedSelection)
+        sc = QShortcut(QKeySequence.StandardKey.Copy, self.table)
+        sc.activated.connect(self._copy_selection)
+        self.table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(
+            self._show_context_menu)
+
     def apply_theme(self, dark=True):
         """Update table theme."""
         if dark:
@@ -398,6 +408,44 @@ class RateTableCard(SimpleCardWidget):
         if not fnt.exactMatch():
             fnt = QFont("Courier New", 9)
         self.table.setFont(fnt)
+
+    def _copy_selection(self):
+        """Copy selected table cells to clipboard (with headers)."""
+        sel = self.table.selectedRanges()
+        if not sel:
+            return
+        mr = min(r.topRow() for r in sel)
+        xr = max(r.bottomRow() for r in sel)
+        mc = min(r.leftColumn() for r in sel)
+        xc = max(r.rightColumn() for r in sel)
+        rows = []
+        # Header row
+        hdr = []
+        for c in range(mc, xc + 1):
+            h = self.table.horizontalHeaderItem(c)
+            hdr.append(h.text() if h else "")
+        rows.append('\t'.join(hdr))
+        # Data rows
+        for r in range(mr, xr + 1):
+            rd = []
+            for c in range(mc, xc + 1):
+                it = self.table.item(r, c)
+                rd.append(it.text() if it else "")
+            rows.append('\t'.join(rd))
+        QApplication.clipboard().setText('\n'.join(rows))
+
+    def _show_context_menu(self, pos):
+        """Right-click context menu for the table."""
+        menu = QMenu(self)
+        copy_act = QAction("Copy", self)
+        copy_act.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_act.triggered.connect(self._copy_selection)
+        menu.addAction(copy_act)
+        sel_all_act = QAction("Select All", self)
+        sel_all_act.setShortcut(QKeySequence.StandardKey.SelectAll)
+        sel_all_act.triggered.connect(self.table.selectAll)
+        menu.addAction(sel_all_act)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
 # ── Application palette ──────────────────────────────────────────────
@@ -473,6 +521,13 @@ class MainWindow(FluentWindow):
                             position=NavigationItemPosition.BOTTOM)
 
         setTheme(Theme.DARK)
+
+        # Enable Windows 11 Mica effect (native frosted glass material)
+        # Gracefully falls back on Windows 10 or unsupported systems
+        try:
+            self.setMicaEffectEnabled(True)
+        except Exception:
+            pass  # Mica not available on this system
 
         # Set application palette for all non-QFluentWidgets widgets
         _apply_app_palette(dark=True)
@@ -1549,7 +1604,13 @@ class ExperimentalReverseRateDialog(MessageBoxBase):
         self.result_table = TableWidget()
         self.result_table.setAlternatingRowColors(True)
         self.result_table.setItemDelegate(TableItemDelegate(self.result_table))
+        self.result_table.setSelectionMode(
+            TableWidget.SelectionMode.ExtendedSelection)
         self.viewLayout.addWidget(self.result_table)
+
+        # Copy shortcut
+        sc = QShortcut(QKeySequence.StandardKey.Copy, self.result_table)
+        sc.activated.connect(self._copy_result)
 
     def _reload_thermo_if_changed(self):
         if not reload_thermo_if_changed or not self.thermo_filepath:
@@ -1614,6 +1675,29 @@ class ExperimentalReverseRateDialog(MessageBoxBase):
     def _show_err(self, msg):
         InfoBar.error(title="Error", content=msg, parent=self,
                       position=InfoBarPosition.TOP, duration=4000)
+
+    def _copy_result(self):
+        """Copy selected result table cells to clipboard."""
+        sel = self.result_table.selectedRanges()
+        if not sel:
+            return
+        mr = min(r.topRow() for r in sel)
+        xr = max(r.bottomRow() for r in sel)
+        mc = min(r.leftColumn() for r in sel)
+        xc = max(r.rightColumn() for r in sel)
+        rows = []
+        hdr = []
+        for c in range(mc, xc + 1):
+            h = self.result_table.horizontalHeaderItem(c)
+            hdr.append(h.text() if h else "")
+        rows.append('\t'.join(hdr))
+        for r in range(mr, xr + 1):
+            rd = []
+            for c in range(mc, xc + 1):
+                it = self.result_table.item(r, c)
+                rd.append(it.text() if it else "")
+            rows.append('\t'.join(rd))
+        QApplication.clipboard().setText('\n'.join(rows))
 
 
 class NasaPolynomialInputDialog(MessageBoxBase):

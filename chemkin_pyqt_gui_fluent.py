@@ -7,13 +7,16 @@ import sys
 import os
 import re
 import shutil
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
     QHeaderView, QSizePolicy, QFileDialog, QMenu, QColorDialog,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut
+from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut, QPalette
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -26,19 +29,19 @@ pg.setConfigOption('antialias', True)
 pg.setConfigOption('leftButtonPan', False)
 
 import matplotlib
-matplotlib.rcParams['figure.facecolor'] = '#2b2b2b'
-matplotlib.rcParams['axes.facecolor'] = '#353535'
-matplotlib.rcParams['axes.edgecolor'] = '#888888'
-matplotlib.rcParams['axes.labelcolor'] = '#e0e0e0'
-matplotlib.rcParams['xtick.color'] = '#cccccc'
-matplotlib.rcParams['ytick.color'] = '#cccccc'
-matplotlib.rcParams['text.color'] = '#e0e0e0'
-matplotlib.rcParams['grid.color'] = '#555555'
+matplotlib.rcParams['figure.facecolor'] = '#1a1d23'
+matplotlib.rcParams['axes.facecolor'] = '#222630'
+matplotlib.rcParams['axes.edgecolor'] = '#3a3f4b'
+matplotlib.rcParams['axes.labelcolor'] = '#e8ecf4'
+matplotlib.rcParams['xtick.color'] = '#b0b8c8'
+matplotlib.rcParams['ytick.color'] = '#b0b8c8'
+matplotlib.rcParams['text.color'] = '#e8ecf4'
+matplotlib.rcParams['grid.color'] = '#3a3f4b'
 matplotlib.rcParams['grid.alpha'] = 0.5
-matplotlib.rcParams['legend.facecolor'] = '#353535'
-matplotlib.rcParams['legend.edgecolor'] = '#555555'
+matplotlib.rcParams['legend.facecolor'] = '#222630'
+matplotlib.rcParams['legend.edgecolor'] = '#3a3f4b'
 matplotlib.rcParams['legend.fontsize'] = 'small'
-matplotlib.rcParams['legend.labelcolor'] = '#e0e0e0'
+matplotlib.rcParams['legend.labelcolor'] = '#e8ecf4'
 
 # QFluentWidgets
 from qfluentwidgets import (
@@ -283,11 +286,11 @@ class RateTableCard(SimpleCardWidget):
         # Fluent-style table QSS
         self.table.setStyleSheet("""
             QTableWidget {
-                background-color: #353535;
-                alternate-background-color: #404040;
-                color: #e0e0e0;
-                gridline-color: #4a4a4a;
-                border: 1px solid #4a4a4a;
+                background-color: #222630;
+                alternate-background-color: #2e3440;
+                color: #e8ecf4;
+                gridline-color: #3a3f4b;
+                border: 1px solid #3a3f4b;
                 border-radius: 8px;
                 selection-background-color: #4a90e2;
                 selection-color: #ffffff;
@@ -296,22 +299,22 @@ class RateTableCard(SimpleCardWidget):
             }
             QTableWidget::item {
                 padding: 6px 10px;
-                border-bottom: 1px solid #404040;
+                border-bottom: 1px solid #2e3440;
             }
             QTableWidget::item:hover {
-                background-color: #454545;
+                background-color: #3a3f4b;
             }
             QTableWidget::item:selected {
                 background-color: #4a90e2;
                 color: #ffffff;
             }
             QHeaderView::section {
-                background-color: #2b2b2b;
-                color: #ffffff;
+                background-color: #1a1d23;
+                color: #e8ecf4;
                 padding: 8px 10px;
                 border: none;
                 border-bottom: 2px solid #4a90e2;
-                border-right: 1px solid #404040;
+                border-right: 1px solid #2e3440;
                 font-weight: bold;
                 font-size: 9pt;
             }
@@ -319,10 +322,10 @@ class RateTableCard(SimpleCardWidget):
                 border-right: none;
             }
             QScrollBar:vertical {
-                background: #2b2b2b; width: 12px; border-radius: 6px;
+                background: #1a1d23; width: 12px; border-radius: 6px;
             }
             QScrollBar::handle:vertical {
-                background: #555555; border-radius: 6px; min-height: 30px;
+                background: #3a3f4b; border-radius: 6px; min-height: 30px;
             }
             QScrollBar::handle:vertical:hover {
                 background: #4a90e2;
@@ -331,10 +334,10 @@ class RateTableCard(SimpleCardWidget):
                 height: 0;
             }
             QScrollBar:horizontal {
-                background: #2b2b2b; height: 12px; border-radius: 6px;
+                background: #1a1d23; height: 12px; border-radius: 6px;
             }
             QScrollBar::handle:horizontal {
-                background: #555555; border-radius: 6px; min-width: 30px;
+                background: #3a3f4b; border-radius: 6px; min-width: 30px;
             }
             QScrollBar::handle:horizontal:hover {
                 background: #4a90e2;
@@ -347,9 +350,9 @@ class RateTableCard(SimpleCardWidget):
     def apply_theme(self, dark=True):
         """Update table theme."""
         if dark:
-            bg, alt, fg, grid, hdr_bg = '#353535', '#3a3a3a', '#e0e0e0', '#4a4a4a', '#2b2b2b'
+            bg, alt, fg, grid, hdr_bg = '#222630', '#2e3440', '#e8ecf4', '#3a3f4b', '#1a1d23'
         else:
-            bg, alt, fg, grid, hdr_bg = '#ffffff', '#f8f8f8', '#333333', '#e0e0e0', '#f0f0f0'
+            bg, alt, fg, grid, hdr_bg = '#ffffff', '#f8f9fa', '#2c3e50', '#dce1e8', '#f0f2f5'
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {bg}; alternate-background-color: {alt};
@@ -397,6 +400,50 @@ class RateTableCard(SimpleCardWidget):
         self.table.setFont(fnt)
 
 
+# ── Application palette ──────────────────────────────────────────────
+
+def _apply_app_palette(dark=True):
+    """Set QApplication palette to match the theme.
+
+    QFluentWidgets setTheme() only manages its own widget styles.
+    We must set the app palette for all other Qt widgets
+    (QPlainTextEdit, QLineEdit, QCheckBox, QDialog, etc.)
+    to prevent them from appearing in light/white colors.
+    """
+    pal = QPalette()
+    if dark:
+        pal.setColor(QPalette.ColorRole.Window, QColor('#1a1d23'))
+        pal.setColor(QPalette.ColorRole.WindowText, QColor('#e8ecf4'))
+        pal.setColor(QPalette.ColorRole.Base, QColor('#222630'))
+        pal.setColor(QPalette.ColorRole.AlternateBase, QColor('#2e3440'))
+        pal.setColor(QPalette.ColorRole.ToolTipBase, QColor('#222630'))
+        pal.setColor(QPalette.ColorRole.ToolTipText, QColor('#e8ecf4'))
+        pal.setColor(QPalette.ColorRole.Text, QColor('#e8ecf4'))
+        pal.setColor(QPalette.ColorRole.Button, QColor('#222630'))
+        pal.setColor(QPalette.ColorRole.ButtonText, QColor('#e8ecf4'))
+        pal.setColor(QPalette.ColorRole.BrightText, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.Link, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.Highlight, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
+        pal.setColor(QPalette.ColorRole.PlaceholderText, QColor('#7a8599'))
+    else:
+        pal.setColor(QPalette.ColorRole.Window, QColor('#f0f2f5'))
+        pal.setColor(QPalette.ColorRole.WindowText, QColor('#2c3e50'))
+        pal.setColor(QPalette.ColorRole.Base, QColor('#ffffff'))
+        pal.setColor(QPalette.ColorRole.AlternateBase, QColor('#f8f9fa'))
+        pal.setColor(QPalette.ColorRole.ToolTipBase, QColor('#ffffff'))
+        pal.setColor(QPalette.ColorRole.ToolTipText, QColor('#2c3e50'))
+        pal.setColor(QPalette.ColorRole.Text, QColor('#2c3e50'))
+        pal.setColor(QPalette.ColorRole.Button, QColor('#ffffff'))
+        pal.setColor(QPalette.ColorRole.ButtonText, QColor('#2c3e50'))
+        pal.setColor(QPalette.ColorRole.BrightText, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.Link, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.Highlight, QColor('#4a90e2'))
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
+        pal.setColor(QPalette.ColorRole.PlaceholderText, QColor('#95a5a6'))
+    QApplication.instance().setPalette(pal)
+
+
 # ── Main FluentWindow ────────────────────────────────────────────────
 
 class MainWindow(FluentWindow):
@@ -426,6 +473,9 @@ class MainWindow(FluentWindow):
                             position=NavigationItemPosition.BOTTOM)
 
         setTheme(Theme.DARK)
+
+        # Set application palette for all non-QFluentWidgets widgets
+        _apply_app_palette(dark=True)
 
         # Force dark theme on all child widgets
         self._apply_global_dark_qss()
@@ -752,6 +802,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
     def _on_theme_toggled(self, dark):
         setTheme(Theme.DARK if dark else Theme.LIGHT)
+        _apply_app_palette(dark)
         self._apply_global_dark_qss(dark)
         self.plot_card.apply_theme(dark)
         self.table_card.apply_theme(dark)
@@ -1642,6 +1693,7 @@ class NasaPolynomialInputDialog(MessageBoxBase):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    _apply_app_palette(dark=True)
     w = MainWindow()
     w.show()
     sys.exit(app.exec())

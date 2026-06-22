@@ -55,3 +55,4 @@ chemkin_rate_viewer.exe_extracted/
 chemkin_pyqt_gui.build/
 chemkin_pyqt_gui.dist/
 *.pyc
+.superpowers/

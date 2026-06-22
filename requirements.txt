@@ -3,6 +3,16 @@ PyQt6>=6.4.0
 matplotlib>=3.6.0
 numpy>=1.23.0
 PyQt6-Fluent-Widgets>=1.11.0
+pyqtgraph>=0.13.0
+
+# Optional dependencies (Excel export feature)
+pandas>=1.5.0
+openpyxl>=3.0.0
+# Required dependencies
+PyQt6>=6.4.0
+matplotlib>=3.6.0
+numpy>=1.23.0
+PyQt6-Fluent-Widgets>=1.11.0
 
 # Optional dependencies (Excel export feature)
 pandas>=1.5.0

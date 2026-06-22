@@ -544,6 +544,16 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         rl.setSpacing(8)
         self.plot_card = PyQtGraphCard()
         rl.addWidget(self.plot_card, 3)
+
+        # Plot export toolbar
+        export_layout = QHBoxLayout()
+        export_layout.setContentsMargins(0, 2, 0, 0)
+        export_layout.addStretch()
+        export_img_btn = PushButton("Export Plot Image")
+        export_img_btn.clicked.connect(self._on_export_image_clicked)
+        export_layout.addWidget(export_img_btn)
+        rl.addLayout(export_layout)
+
         self.table_card = RateTableCard()
         rl.addWidget(self.table_card, 2)
         main_lay.addWidget(rw, 1)
@@ -1291,6 +1301,84 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info(f"Exported to {fp}")
         except Exception as e:
             self._info(f"Export error: {e}", "error")
+
+    def _on_export_image_clicked(self):
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Export Plot", "reaction_rates.svg",
+            "SVG (*.svg);;PDF (*.pdf);;PNG (*.png)")
+        if fp:
+            self._export_plot_image(fp)
+
+    def _export_plot_image(self, filepath):
+        """Export current plot as high-quality static image using matplotlib."""
+        if not hasattr(self, 'parsed_reactions') or not self.parsed_reactions:
+            self._info("No data to export.", "warning")
+            return
+
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib.figure import Figure as MplFigure
+
+        fig = MplFigure(figsize=(10, 6), dpi=300)
+        fig.set_facecolor('#1a1d23')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#222630')
+        ax.tick_params(colors='#b0b8c8')
+        ax.title.set_color('#e8ecf4')
+        ax.xaxis.label.set_color('#e8ecf4')
+        ax.yaxis.label.set_color('#e8ecf4')
+        for spine in ax.spines.values():
+            spine.set_edgecolor('#3a3f4b')
+
+        try:
+            T_min = float(self.temp_min.text())
+            T_max = float(self.temp_max.text())
+            T_vals = np.linspace(T_min, T_max, 200)
+            inv = self.use_inv_temp_cb.isChecked()
+            x_vals = 1000.0 / T_vals if inv else T_vals
+            x_label = "1000/T (K\u207b\u00b9)" if inv else "Temperature (K)"
+            P_vals, use_range, P_def = self._get_plot_pressure_settings()
+        except ValueError:
+            self._info("Invalid parameters for export.", "error")
+            return
+
+        curve_colors = [
+            '#4a90e2', '#e2764a', '#4ae28a', '#e24a90', '#904ae2',
+            '#e2d04a', '#4ae2d0', '#e24a4a', '#8ae24a', '#4a6ee2',
+        ]
+        ls_list = ['-', '--', '-.', ':']
+
+        for ri, rd in enumerate(self.parsed_reactions):
+            lbl_base = rd.get('equation_string_cleaned',
+                              rd.get('equation_string', 'N/A'))
+            rt = rd.get('reaction_type', 'ARRHENIUS')
+            is_rev = rd.get('is_calculating_reverse', False)
+            pressures = P_vals if (use_range and rt in ('PLOG', 'TROE')) else [P_def]
+
+            for pi, Pv in enumerate(pressures):
+                k_log = self._calc_k_log_array(rd, T_vals, Pv, is_rev)
+                if k_log is not None and any(~np.isnan(k_log)):
+                    pfx = "kr" if is_rev else "kf"
+                    color = curve_colors[(ri + pi) % len(curve_colors)]
+                    ls = ls_list[(ri + pi) % len(ls_list)]
+                    lbl = f"{pfx}: {lbl_base}"
+                    if rt in ('PLOG', 'TROE') and len(pressures) > 1:
+                        lbl += f" @ {Pv:.1f} atm"
+                    ax.plot(x_vals, k_log, label=lbl, color=color,
+                            linewidth=2, linestyle=ls)
+
+        ax.set_xlabel(x_label, fontsize=12)
+        ax.set_ylabel("log\u2081\u2080(k)", fontsize=12)
+        ax.set_title("Reaction Rates vs Temperature", fontsize=14,
+                     fontweight='bold')
+        if ax.get_legend_handles_labels()[1]:
+            ax.legend(fontsize=9, facecolor='#222630', edgecolor='#3a3f4b',
+                      labelcolor='#e8ecf4')
+        ax.grid(True, color='#3a3f4b', alpha=0.5)
+
+        fig.savefig(filepath, dpi=300, bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
+        self._info(f"Exported: {filepath}")
 
 
 # ── Dialogs ──────────────────────────────────────────────────────────

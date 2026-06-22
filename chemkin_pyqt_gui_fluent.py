@@ -16,10 +16,14 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+
+import pyqtgraph as pg
+pg.setConfigOption('background', '#1a1d23')
+pg.setConfigOption('foreground', '#b0b8c8')
+pg.setConfigOption('antialias', True)
+pg.setConfigOption('leftButtonPan', False)
 
 import matplotlib
 matplotlib.rcParams['figure.facecolor'] = '#2b2b2b'
@@ -179,102 +183,86 @@ def validate_nasa7_format(input_text):
     return True, errors, species_data
 
 
-# ── Matplotlib card ──────────────────────────────────────────────────
+# ── PyQtGraph card ───────────────────────────────────────────────────
 
-class MatplotlibCard(SimpleCardWidget):
+class PyQtGraphCard(SimpleCardWidget):
+    """Card containing a pyqtgraph PlotWidget for interactive charting."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 16, 16, 16)
         self._title = SubtitleLabel("Reaction Rates vs Temperature")
         lay.addWidget(self._title)
-        self.figure = Figure(figsize=(5, 4), dpi=100)
-        self.figure.set_facecolor('#2b2b2b')
-        self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        self._style_toolbar_dark()
-        lay.addWidget(self.toolbar)
-        lay.addWidget(self.canvas, 1)
-        self.axes = self.figure.add_subplot(111)
-        self._apply_dark_axes()
 
-    def _apply_dark_axes(self):
-        """Style axes for dark theme."""
-        for ax in self.figure.get_axes():
-            ax.set_facecolor('#353535')
-            ax.tick_params(colors='#cccccc')
-            ax.title.set_color('#e0e0e0')
-            ax.xaxis.label.set_color('#e0e0e0')
-            ax.yaxis.label.set_color('#e0e0e0')
-            for spine in ax.spines.values():
-                spine.set_edgecolor('#888888')
-            ax.grid(True, color='#666666', alpha=0.6)
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setLabel('bottom', 'Temperature', units='K')
+        self.plot_widget.setLabel('left', 'log₁₀(k)')
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+        self.plot_widget.addLegend(offset=(60, 10))
+        self.plot_widget.setMinimumHeight(300)
 
-    def _style_toolbar_dark(self):
-        """Style the matplotlib navigation toolbar for dark theme."""
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #2b2b2b;
-                border: none;
-                spacing: 4px;
-                padding: 2px;
-            }
-            QToolButton {
-                background-color: transparent;
-                border: 1px solid transparent;
-                border-radius: 4px;
-                padding: 4px;
-                color: #e0e0e0;
-            }
-            QToolButton:hover {
-                background-color: #404040;
-                border: 1px solid #4a90e2;
-            }
-            QToolButton:pressed {
-                background-color: #357abd;
-            }
-        """)
+        # Crosshair
+        self.vline = pg.InfiniteLine(angle=90, movable=False,
+            pen=pg.mkPen('#7a8599', style=Qt.PenStyle.DashLine))
+        self.hline = pg.InfiniteLine(angle=0, movable=False,
+            pen=pg.mkPen('#7a8599', style=Qt.PenStyle.DashLine))
+        self.vline.setVisible(False)
+        self.hline.setVisible(False)
+        self.plot_widget.addItem(self.vline)
+        self.plot_widget.addItem(self.hline)
 
-    def apply_theme(self, dark=True):
-        """Re-apply theme to figure and toolbar."""
-        bg = '#2b2b2b' if dark else '#ffffff'
-        fg = '#e0e0e0' if dark else '#000000'
-        ax_bg = '#353535' if dark else '#ffffff'
-        grid_c = '#555555' if dark else '#cccccc'
-        spine_c = '#888888' if dark else '#333333'
-        tick_c = '#cccccc' if dark else '#333333'
+        self.coord_label = pg.TextItem('', anchor=(0, 1), color='#e8ecf4',
+            fill=pg.mkBrush('#222630cc'))
+        self.coord_label.setVisible(False)
+        self.plot_widget.addItem(self.coord_label)
 
-        self.figure.set_facecolor(bg)
-        self.canvas.setStyleSheet(f"background-color: {bg};")
-        for ax in self.figure.get_axes():
-            ax.set_facecolor(ax_bg)
-            ax.tick_params(colors=tick_c)
-            ax.title.set_color(fg)
-            ax.xaxis.label.set_color(fg)
-            ax.yaxis.label.set_color(fg)
-            for spine in ax.spines.values():
-                spine.set_edgecolor(spine_c)
-            ax.grid(True, color=grid_c, alpha=0.5)
-            if ax.get_legend():
-                leg = ax.get_legend()
-                leg.get_frame().set_facecolor(ax_bg)
-                leg.get_frame().set_edgecolor(spine_c)
-                for t in leg.get_texts():
-                    t.set_color(fg)
+        self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
-        tb_bg = '#2b2b2b' if dark else '#f0f0f0'
-        tb_fg = '#e0e0e0' if dark else '#333333'
-        self.toolbar.setStyleSheet(f"""
-            QToolBar {{ background-color: {tb_bg}; border: none; spacing: 4px; padding: 2px; }}
-            QToolButton {{ background-color: transparent; border: 1px solid transparent;
-                          border-radius: 4px; padding: 4px; color: {tb_fg}; }}
-            QToolButton:hover {{ background-color: #404040; border: 1px solid #4a90e2; }}
-            QToolButton:pressed {{ background-color: #357abd; }}
-        """)
-        self.canvas.draw_idle()
+        lay.addWidget(self.plot_widget, 1)
+
+    def _on_mouse_moved(self, pos):
+        vb = self.plot_widget.vb
+        if not self.plot_widget.sceneBoundingRect().contains(pos):
+            return
+        mouse_point = vb.mapSceneToView(pos)
+        x, y = mouse_point.x(), mouse_point.y()
+        view_range = vb.viewRange()
+        if (view_range[0][0] <= x <= view_range[0][1] and
+                view_range[1][0] <= y <= view_range[1][1]):
+            self.vline.setPos(x)
+            self.hline.setPos(y)
+            self.vline.setVisible(True)
+            self.hline.setVisible(True)
+            self.coord_label.setText(f'T={x:.0f} K  log(k)={y:.2f}')
+            self.coord_label.setPos(x, y)
+            self.coord_label.setVisible(True)
+        else:
+            self.vline.setVisible(False)
+            self.hline.setVisible(False)
+            self.coord_label.setVisible(False)
+
+    def clear_plot(self):
+        self.plot_widget.clear()
+        # Re-add crosshair items after clear
+        self.plot_widget.addItem(self.vline)
+        self.plot_widget.addItem(self.hline)
+        self.plot_widget.addItem(self.coord_label)
 
     def set_title(self, t):
         self._title.setText(t)
+
+    def apply_theme(self, dark=True):
+        bg = '#1a1d23' if dark else '#f0f2f5'
+        fg = '#b0b8c8' if dark else '#6c757d'
+        pg.setConfigOption('background', bg)
+        pg.setConfigOption('foreground', fg)
+        self.plot_widget.setBackground(bg)
+        for axis_name in ('bottom', 'left'):
+            ax = self.plot_widget.getAxis(axis_name)
+            ax.setPen(pg.mkPen(fg))
+            ax.setTextPen(pg.mkPen(fg))
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
 
 
 # ── Rate table card ──────────────────────────────────────────────────
@@ -554,7 +542,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         rl = QVBoxLayout(rw)
         rl.setContentsMargins(8, 8, 8, 8)
         rl.setSpacing(8)
-        self.plot_card = MatplotlibCard()
+        self.plot_card = PyQtGraphCard()
         rl.addWidget(self.plot_card, 3)
         self.table_card = RateTableCard()
         rl.addWidget(self.table_card, 2)
@@ -893,6 +881,21 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         except Exception:
             return None
 
+    def _calc_k_log_array(self, rd, T_vals, P, is_rev):
+        """Calculate log10(k) array for plotting."""
+        if is_rev:
+            k_arr = np.array([
+                (self._calculate_reverse_rate_for_plot(rd, t, P) or np.nan)
+                for t in T_vals
+            ])
+        else:
+            k_arr = self._calculate_rate_array(rd, T_vals, P)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            k_log = np.where(
+                (k_arr != None) & ~np.isnan(k_arr) & (k_arr > 1e-100),
+                np.log10(k_arr), np.nan)
+        return k_log
+
     # ── Table population ─────────────────────────────────────────────
 
     def _update_rate_constant_table(self, parsed_reactions):
@@ -1121,28 +1124,16 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self.parsed_reactions = parsed_reactions
         self._update_plot_with_reverse_rates()
 
-    def _style_axes_dark(self, ax):
-        """Apply dark theme styling to axes after clear()."""
-        ax.set_facecolor('#353535')
-        ax.tick_params(colors='#cccccc')
-        ax.title.set_color('#e0e0e0')
-        ax.xaxis.label.set_color('#e0e0e0')
-        ax.yaxis.label.set_color('#e0e0e0')
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#888888')
-
     def _update_plot_with_reverse_rates(self):
         if not hasattr(self, 'parsed_reactions'):
             return
-        ax = self.plot_card.axes
-        ax.clear()
-        self._style_axes_dark(ax)
+        pw = self.plot_card.plot_widget
+        self.plot_card.clear_plot()
         try:
             T_min = float(self.temp_min.text())
             T_max = float(self.temp_max.text())
             if not (T_max > T_min and T_min > 0):
                 self._info("Invalid temperature range.", "error")
-                self.plot_card.canvas.draw()
                 return
             T_vals = np.linspace(T_min, T_max, 100)
             inv = self.use_inv_temp_cb.isChecked()
@@ -1151,8 +1142,18 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             P_vals, use_range, P_def = self._get_plot_pressure_settings()
         except ValueError:
             self._info("Invalid numeric input.", "error")
-            self.plot_card.canvas.draw()
             return
+
+        pw.setLabel('bottom', x_label)
+
+        curve_colors = [
+            '#4a90e2', '#e2764a', '#4ae28a', '#e24a90', '#904ae2',
+            '#e2d04a', '#4ae2d0', '#e24a4a', '#8ae24a', '#4a6ee2',
+        ]
+        pen_styles = [
+            Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine,
+            Qt.PenStyle.DashDotLine, Qt.PenStyle.DotLine,
+        ]
 
         n_plotted = 0
         for ri, rd in enumerate(self.parsed_reactions):
@@ -1163,51 +1164,29 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
             if use_range and rt in ('PLOG', 'TROE'):
                 for pi, Pv in enumerate(P_vals):
-                    if is_rev:
-                        k_log = [np.log10(k) if k and k > 1e-100 else np.nan
-                                 for k in (self._calculate_reverse_rate_for_plot(
-                                    rd, t, Pv) for t in T_vals)]
-                    else:
-                        ka = self._calculate_rate_array(rd, T_vals, Pv)
-                        k_log = np.where(
-                            (ka != None) & ~np.isnan(ka) & (ka > 1e-100),
-                            np.log10(ka), np.nan)
-                    if any(not np.isnan(v) for v in k_log):
+                    k_log = self._calc_k_log_array(rd, T_vals, Pv, is_rev)
+                    if k_log is not None and any(~np.isnan(k_log)):
                         pfx = "kr" if is_rev else "kf"
-                        c, ls = self._get_reaction_style(ri, pi)
-                        ax.plot(x_vals, k_log,
-                                label=f"{pfx}: {lbl_base} @ {Pv:.2E} atm",
-                                color=c, linestyle=ls)
+                        color = curve_colors[(ri + pi) % len(curve_colors)]
+                        style = pen_styles[(ri + pi) % len(pen_styles)]
+                        pen = pg.mkPen(color=color, width=2, style=style)
+                        pw.plot(x_vals, k_log,
+                                name=f"{pfx}: {lbl_base} @ {Pv:.1f} atm",
+                                pen=pen)
                         n_plotted += 1
             else:
                 P_use = P_def
-                if is_rev:
-                    k_log = [np.log10(k) if k and k > 1e-100 else np.nan
-                             for k in (self._calculate_reverse_rate_for_plot(
-                                rd, t, P_use) for t in T_vals)]
-                else:
-                    ka = self._calculate_rate_array(rd, T_vals, P_use)
-                    k_log = np.where(
-                        (ka != None) & ~np.isnan(ka) & (ka > 1e-100),
-                        np.log10(ka), np.nan)
-                if any(not np.isnan(v) for v in k_log):
+                k_log = self._calc_k_log_array(rd, T_vals, P_use, is_rev)
+                if k_log is not None and any(~np.isnan(k_log)):
                     pfx = "kr" if is_rev else "kf"
+                    color = curve_colors[ri % len(curve_colors)]
+                    style = pen_styles[ri % len(pen_styles)]
+                    pen = pg.mkPen(color=color, width=2, style=style)
                     lbl = f"{pfx}: {lbl_base}"
                     if rt in ('PLOG', 'TROE'):
-                        lbl += f" @ {P_use:.2E} atm"
-                    c, ls = self._get_reaction_style(ri, 0)
-                    ax.plot(x_vals, k_log, label=lbl, color=c, linestyle=ls)
+                        lbl += f" @ {P_use:.1f} atm"
+                    pw.plot(x_vals, k_log, name=lbl, pen=pen)
                     n_plotted += 1
-
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("log10(k)")
-        ax.set_title("Reaction Rates vs Temperature")
-        if n_plotted > 0:
-            ax.legend(fontsize='small')
-        ax.grid(True, color='#666666', alpha=0.6)
-        # Re-apply dark styling after setting labels/title
-        self._style_axes_dark(ax)
-        self.plot_card.canvas.draw()
 
     # ── Main pipeline ────────────────────────────────────────────────
 
@@ -1216,9 +1195,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         if not txt.strip():
             self._info("CHEMKIN input is empty.", "warning")
             self.table_card.table.setRowCount(0)
-            self.plot_card.axes.clear()
-            self._style_axes_dark(self.plot_card.axes)
-            self.plot_card.canvas.draw()
+            self.plot_card.clear_plot()
             return
 
         temps = self._parse_temperature_input()

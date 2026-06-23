@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import shutil
+import tempfile
 import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -57,6 +58,7 @@ from qfluentwidgets import (
     ScrollArea, SmoothScrollArea, SingleDirectionScrollArea,
     MessageBoxBase,
     MessageBox,
+    SegmentedWidget,
     setFont,
 )
 
@@ -793,7 +795,162 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
     # ── Thermo Compare page ──────────────────────────────────────────
 
     def _build_thermo_compare(self):
-        pass
+        main_lay = QHBoxLayout(self._thermo_compare)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        main_lay.setSpacing(0)
+
+        # Left scroll panel
+        scroll = SmoothScrollArea()
+        scroll.setObjectName("leftPanel")
+        scroll.setFixedWidth(420)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidgetResizable(True)
+        lw = QWidget()
+        lw.setObjectName("leftPanelContent")
+        ll = QVBoxLayout(lw)
+        ll.setContentsMargins(16, 16, 16, 16)
+        ll.setSpacing(12)
+
+        # Hero header
+        hero = QWidget()
+        hero.setObjectName("heroHeader")
+        hero_lay = QHBoxLayout(hero)
+        hero_lay.setContentsMargins(20, 16, 20, 16)
+        hero_lay.setSpacing(14)
+        logo_lbl = QLabel()
+        logo_path = self._resolve_icon_path()
+        if os.path.exists(logo_path):
+            px = QPixmap(logo_path).scaled(
+                44, 44, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(px)
+        logo_lbl.setFixedSize(44, 44)
+        hero_lay.addWidget(logo_lbl)
+        txt_col = QVBoxLayout()
+        txt_col.setSpacing(2)
+        tt = TitleLabel("Thermo Compare")
+        txt_col.addWidget(tt)
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(10)
+        sub_row.addWidget(CaptionLabel("NASA Polynomial Comparison"))
+        badge = QLabel("v1.3")
+        badge.setObjectName("versionBadge")
+        badge.setFixedHeight(20)
+        badge.setStyleSheet(
+            "background-color: #4a90e2; color: #ffffff; padding: 1px 8px; "
+            "border-radius: 10px; font-size: 10px; font-weight: bold;")
+        sub_row.addWidget(badge)
+        sub_row.addStretch()
+        txt_col.addLayout(sub_row)
+        hero_lay.addLayout(txt_col, 1)
+        ll.addWidget(hero)
+
+        # Pill TabBar: H | S | Cp
+        self.thermo_tab = SegmentedWidget()
+        self.thermo_tab.addItem(routeKey="H", text="H (kJ/mol)")
+        self.thermo_tab.addItem(routeKey="S", text="S (J/mol·K)")
+        self.thermo_tab.addItem(routeKey="Cp", text="Cp (J/mol·K)")
+        self.thermo_tab.setCurrentItem("H")
+        self.thermo_tab.setFixedHeight(40)
+        self._thermo_tab_idx = 0
+        self.thermo_tab.currentItemChanged.connect(
+            lambda k: self._on_thermo_tab_changed({"H": 0, "S": 1, "Cp": 2}[k]))
+        ll.addWidget(self.thermo_tab)
+
+        # NASA input card
+        ic = SimpleCardWidget()
+        il = QVBoxLayout(ic)
+        il.setContentsMargins(16, 16, 16, 16)
+        il.addWidget(StrongBodyLabel("NASA Polynomial Input"))
+        self.thermo_input = PlainTextEdit()
+        self.thermo_input.setMinimumHeight(180)
+        self.thermo_input.setPlaceholderText(
+            "Paste NASA 7-coefficient polynomial data here...\n"
+            "One species per 4-line block. Example:\n"
+            "H2O    L 1/96H  2O  1   0   0G   200.000  3500.000  1000.000 1\n"
+            " 3.386...e+00  3.474...e-03 -6.354...e-06  6.968...e-09 -2.506...e-12  2\n"
+            " 2.590...e+03  1.195...e-03 -4.338...e-06  6.884...e-09 -3.696...e-12  3\n"
+            " 3.042...e+03  1.203...e-03 -4.572...e-06  7.332...e-09 -3.975...e-12  4")
+        il.addWidget(self.thermo_input)
+        ll.addWidget(ic)
+
+        # Controls card
+        cc = SimpleCardWidget()
+        cl = QVBoxLayout(cc)
+        cl.setContentsMargins(16, 16, 16, 16)
+        cl.setSpacing(8)
+        cl.addWidget(StrongBodyLabel("Controls"))
+        self.thermo_tmin = LineEdit(); self.thermo_tmin.setText("300")
+        self.thermo_tmax = LineEdit(); self.thermo_tmax.setText("3500")
+        self.thermo_table_temps = LineEdit()
+        self.thermo_table_temps.setText(
+            "300, 500, 700, 1000, 1500, 2000, 2500, 3000")
+        for lbl, w in [("T min (K)", self.thermo_tmin),
+                        ("T max (K)", self.thermo_tmax),
+                        ("Table temps (K)", self.thermo_table_temps)]:
+            r = QHBoxLayout()
+            r.addWidget(CaptionLabel(lbl)); r.addWidget(w); r.addStretch()
+            cl.addLayout(r)
+        ll.addWidget(cc)
+
+        # Parse button
+        self.thermo_parse_btn = PrimaryPushButton(FluentIcon.PLAY, "Parse & Plot")
+        self.thermo_parse_btn.setMinimumHeight(40)
+        self.thermo_parse_btn.clicked.connect(self._on_thermo_parse_clicked)
+        ll.addWidget(self.thermo_parse_btn)
+        ll.addStretch()
+        scroll.setWidget(lw)
+        main_lay.addWidget(scroll)
+
+        # Right panel
+        rw = QWidget()
+        rl = QVBoxLayout(rw)
+        rl.setContentsMargins(8, 8, 8, 8)
+        rl.setSpacing(8)
+
+        # Plot
+        self.thermo_plot_card = PyQtGraphCard()
+        rl.addWidget(self.thermo_plot_card, 2)
+
+        # Export button inline in plot card header
+        export_img_btn = PushButton(FluentIcon.PHOTO, "Export")
+        export_img_btn.clicked.connect(self._on_thermo_export_image_clicked)
+        self.thermo_plot_card.add_title_button(export_img_btn)
+
+        # Empty state placeholder
+        self.thermo_empty_placeholder = QWidget()
+        self.thermo_empty_placeholder.setObjectName("emptyPlaceholder")
+        ep_lay = QVBoxLayout(self.thermo_empty_placeholder)
+        ep_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.setSpacing(12)
+        ep_icon = QLabel("\U0001F4CA")
+        ep_icon.setStyleSheet("font-size: 48px; background: transparent;")
+        ep_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.addWidget(ep_icon)
+        ep_title = BodyLabel("No Data Yet")
+        ep_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.addWidget(ep_title)
+        ep_hint = CaptionLabel(
+            "Paste NASA polynomial data and click Parse to compare species")
+        ep_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_hint.setStyleSheet("color: #95a5a6; background: transparent;")
+        ep_lay.addWidget(ep_hint)
+        rl.addWidget(self.thermo_empty_placeholder, 3)
+
+        # Table
+        self.thermo_table = QTableWidget()
+        self.thermo_table.setAlternatingRowColors(True)
+        self.thermo_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows)
+        self.thermo_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers)
+        self.thermo_table.horizontalHeader().setStretchLastSection(True)
+        self.thermo_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        self.thermo_table.verticalHeader().setVisible(True)
+        rl.addWidget(self.thermo_table, 3)
+        main_lay.addWidget(rw, 1)
 
     # ── Global dark QSS ──────────────────────────────────────────────
 

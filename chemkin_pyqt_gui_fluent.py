@@ -540,11 +540,17 @@ class MainWindow(FluentWindow):
         self._home.setObjectName("home")
         self._build_home()
 
+        self._thermo_compare = QWidget()
+        self._thermo_compare.setObjectName("thermoCompare")
+        self._build_thermo_compare()
+
         self._settings = QWidget()
         self._settings.setObjectName("settings")
         self._build_settings()
 
         self.addSubInterface(self._home, FluentIcon.HOME, "Rate",
+                            position=NavigationItemPosition.TOP)
+        self.addSubInterface(self._thermo_compare, FluentIcon.LINK, "Thermo Compare",
                             position=NavigationItemPosition.TOP)
         self.addSubInterface(self._settings, FluentIcon.SETTING, "Settings",
                             position=NavigationItemPosition.BOTTOM)
@@ -783,6 +789,11 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         al.addWidget(CaptionLabel("中科院工程热物理研究所"))
         lay.addWidget(ac)
         lay.addStretch()
+
+    # ── Thermo Compare page ──────────────────────────────────────────
+
+    def _build_thermo_compare(self):
+        pass
 
     # ── Global dark QSS ──────────────────────────────────────────────
 

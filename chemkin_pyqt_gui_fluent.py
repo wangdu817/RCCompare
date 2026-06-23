@@ -1288,6 +1288,183 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self.thermo_plot_card.setVisible(not show)
         self.thermo_table.setVisible(not show)
 
+    def _get_thermo_coeffs_for_temperature(self, species_data, T):
+        T_ranges = species_data.get('T_ranges', [])
+        coeffs_list = species_data.get('coeffs', [])
+        if len(T_ranges) != 2 or len(coeffs_list) != 2:
+            return None
+        if T_ranges[1][0] <= T <= T_ranges[1][1]:
+            return coeffs_list[0]
+        elif T_ranges[0][0] <= T < T_ranges[1][0]:
+            return coeffs_list[1]
+        return None
+
+    def _get_thermo_style(self, species_index):
+        n_colors = len(CURVE_COLORS)
+        n_styles = len(CURVE_LINE_STYLES)
+        color = CURVE_COLORS[species_index % n_colors]
+        ls_idx = species_index % n_styles
+        return color, CURVE_LINE_STYLES[ls_idx], ls_idx
+
+    def _update_thermo_tab_plot_and_table(self):
+        tab_idx = self._thermo_tab_idx
+        data = getattr(self, 'thermo_species_data', None)
+        if not data:
+            return
+        try:
+            T_min = float(self.thermo_tmin.text())
+            T_max = float(self.thermo_tmax.text())
+            table_txt = self.thermo_table_temps.text().strip()
+            table_temps = [
+                float(s.strip()) for s in table_txt.split(',') if s.strip()
+            ]
+            if not table_temps:
+                self._info("Enter at least one table temperature.", "error")
+                return
+        except (ValueError, AttributeError) as e:
+            self._info(f"Invalid temperature input: {e}", "error")
+            return
+        if T_min <= 0 or T_max <= T_min:
+            self._info("T min must be > 0 and < T max.", "error")
+            return
+        species_names = list(data.keys())
+        if not species_names:
+            return
+        T_plot = np.linspace(T_min, T_max, 200)
+        y_labels = ["H (kJ/mol)", "S (J/mol·K)", "Cp (J/mol·K)"]
+        y_label = y_labels[tab_idx]
+
+        species_curves = {}
+        for sn in species_names:
+            sd = data[sn]
+            vals = []
+            for T in T_plot:
+                coeffs = self._get_thermo_coeffs_for_temperature(sd, T)
+                if coeffs is None:
+                    vals.append(np.nan)
+                else:
+                    Cp, H, S = calculate_cp_h_s(T, coeffs)
+                    if Cp is None:
+                        vals.append(np.nan)
+                    elif tab_idx == 0:
+                        vals.append(H / 1000.0)
+                    elif tab_idx == 1:
+                        vals.append(S)
+                    else:
+                        vals.append(Cp)
+            species_curves[sn] = np.array(vals)
+
+        pw = self.thermo_plot_card.plot_widget
+        pw.clear()
+        legend = pw.addLegend(offset=(10, 10),
+            labelTextColor=self._thermo_legend_text_color(),
+            brush=self._thermo_legend_brush())
+        legend.setParentItem(pw.plotItem.vb)
+
+        for si, sn in enumerate(species_names):
+            y_vals = species_curves[sn]
+            mask = ~np.isnan(y_vals)
+            if not np.any(mask):
+                continue
+            color, pen_style, _ = self._get_thermo_style(si)
+            pen = pg.mkPen(color=color, width=2, style=pen_style)
+            pw.plot(T_plot[mask], y_vals[mask], pen=pen, name=sn)
+
+        pw.setLabel("left", y_label)
+        pw.setLabel("bottom", "T (K)")
+        self._update_thermo_table(species_names, data, table_temps, tab_idx)
+
+    def _thermo_legend_text_color(self):
+        if isDarkTheme():
+            return pg.mkColor('#e8ecf4')
+        return pg.mkColor('#2c3e50')
+
+    def _thermo_legend_brush(self):
+        if isDarkTheme():
+            return pg.mkBrush('#222630cc')
+        return pg.mkBrush('#ffffffe6')
+
+    def _update_thermo_table(self, species_names, data, table_temps, tab_idx):
+        t = self.thermo_table
+        t.setUpdatesEnabled(False)
+        t.clear()
+        n_rows = len(table_temps)
+        n_cols = 2 + len(species_names)
+        t.setRowCount(n_rows)
+        t.setColumnCount(n_cols)
+        t.setHorizontalHeaderLabels(
+            ["T (K)"] + ["Style"] + species_names)
+        t.verticalHeader().setVisible(False)
+
+        for row_i, T in enumerate(table_temps):
+            T_item = QTableWidgetItem(f"{T:.1f}")
+            T_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            t.setItem(row_i, 0, T_item)
+
+            for si, _ in enumerate(species_names):
+                sd = data[species_names[si]]
+                coeffs = self._get_thermo_coeffs_for_temperature(sd, T)
+                val = None
+                if coeffs is not None:
+                    Cp, H, S = calculate_cp_h_s(T, coeffs)
+                    if Cp is not None:
+                        if tab_idx == 0:
+                            val = H / 1000.0
+                        elif tab_idx == 1:
+                            val = S
+                        else:
+                            val = Cp
+
+                col = 2 + si
+                item = QTableWidgetItem(
+                    f"{val:.2f}" if val is not None else "N/A")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                if val is not None:
+                    color = QColor(CURVE_COLORS[si % len(CURVE_COLORS)])
+                    item.setForeground(color)
+                t.setItem(row_i, col, item)
+
+        for si in range(len(species_names)):
+            if si >= n_rows:
+                break
+            _, _, ls_idx = self._get_thermo_style(si)
+            style_item = QTableWidgetItem(LINESTYLE_LABELS.get(ls_idx, "—"))
+            style_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            color = QColor(CURVE_COLORS[si % len(CURVE_COLORS)])
+            style_item.setForeground(color)
+            t.setItem(si, 1, style_item)
+
+        header = t.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        for col in range(2, n_cols):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        t.setUpdatesEnabled(True)
+
+    def _on_thermo_tab_changed(self, idx):
+        self._thermo_tab_idx = idx
+        self._update_thermo_tab_plot_and_table()
+
+    def _on_thermo_export_image_clicked(self):
+        if not getattr(self, 'thermo_species_data', None):
+            self._info("No data to export.", "warning")
+            return
+        y_labels = ["H (kJ/mol)", "S (J/mol·K)", "Cp (J/mol·K)"]
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Image", "",
+            "PNG (*.png);;SVG (*.svg);;PDF (*.pdf)")
+        if not path:
+            return
+        try:
+            pw = self.thermo_plot_card.plot_widget
+            pw.setLabel("left", y_labels[self._thermo_tab_idx])
+            ex = pg.exporters.ImageExporter(pw.plotItem)
+            ex.parameters()['width'] = 1600
+            ex.export(path)
+            self._info(f"Exported to {path}")
+        except Exception as e:
+            self._info(f"Export error: {e}", "error")
+
     # ── Input parsing ────────────────────────────────────────────────
 
     def _parse_temperature_input(self):

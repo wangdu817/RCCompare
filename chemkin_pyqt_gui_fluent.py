@@ -544,7 +544,7 @@ class MainWindow(FluentWindow):
         self._settings.setObjectName("settings")
         self._build_settings()
 
-        self.addSubInterface(self._home, FluentIcon.HOME, "Home",
+        self.addSubInterface(self._home, FluentIcon.HOME, "Rate",
                             position=NavigationItemPosition.TOP)
         self.addSubInterface(self._settings, FluentIcon.SETTING, "Settings",
                             position=NavigationItemPosition.BOTTOM)

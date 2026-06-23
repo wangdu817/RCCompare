@@ -3,6 +3,7 @@ CHEMKIN Rate Viewer - QFluentWidgets Edition
 ==============================================
 Modern Fluent Design GUI for chemical kinetics mechanism analysis.
 """
+import colorsys
 import sys
 import os
 import re
@@ -13,35 +14,35 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem,
-    QHeaderView, QSizePolicy, QFileDialog, QMenu, QColorDialog,
+    QHeaderView, QSizePolicy, QFileDialog, QMenu, QColorDialog, QLabel,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut, QPalette
+from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut, QPalette, QIcon, QPixmap
 
 import numpy as np
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 import pyqtgraph as pg
-pg.setConfigOption('background', '#1a1d23')
-pg.setConfigOption('foreground', '#b0b8c8')
+pg.setConfigOption('background', '#f0f2f5')
+pg.setConfigOption('foreground', '#6c757d')
 pg.setConfigOption('antialias', True)
 pg.setConfigOption('leftButtonPan', False)
 
 import matplotlib
-matplotlib.rcParams['figure.facecolor'] = '#1a1d23'
-matplotlib.rcParams['axes.facecolor'] = '#222630'
-matplotlib.rcParams['axes.edgecolor'] = '#3a3f4b'
-matplotlib.rcParams['axes.labelcolor'] = '#e8ecf4'
-matplotlib.rcParams['xtick.color'] = '#b0b8c8'
-matplotlib.rcParams['ytick.color'] = '#b0b8c8'
-matplotlib.rcParams['text.color'] = '#e8ecf4'
-matplotlib.rcParams['grid.color'] = '#3a3f4b'
+matplotlib.rcParams['figure.facecolor'] = '#f0f2f5'
+matplotlib.rcParams['axes.facecolor'] = '#ffffff'
+matplotlib.rcParams['axes.edgecolor'] = '#dce1e8'
+matplotlib.rcParams['axes.labelcolor'] = '#2c3e50'
+matplotlib.rcParams['xtick.color'] = '#6c757d'
+matplotlib.rcParams['ytick.color'] = '#6c757d'
+matplotlib.rcParams['text.color'] = '#2c3e50'
+matplotlib.rcParams['grid.color'] = '#dce1e8'
 matplotlib.rcParams['grid.alpha'] = 0.5
-matplotlib.rcParams['legend.facecolor'] = '#222630'
-matplotlib.rcParams['legend.edgecolor'] = '#3a3f4b'
+matplotlib.rcParams['legend.facecolor'] = '#ffffff'
+matplotlib.rcParams['legend.edgecolor'] = '#dce1e8'
 matplotlib.rcParams['legend.fontsize'] = 'small'
-matplotlib.rcParams['legend.labelcolor'] = '#e8ecf4'
+matplotlib.rcParams['legend.labelcolor'] = '#2c3e50'
 
 # QFluentWidgets
 from qfluentwidgets import (
@@ -103,6 +104,19 @@ except ImportError as e:
     _convert_ea_to_cal_per_mol = None
 
 THERMO_DATA_DIRNAME = "CHEMKIN_RateViewer"
+
+# Shared color palette for plot curves and table rows
+CURVE_COLORS = [
+    '#4a90e2', '#e2764a', '#4ae28a', '#e24a90', '#904ae2',
+    '#e2d04a', '#4ae2d0', '#e24a4a', '#8ae24a', '#4a6ee2',
+]
+
+CURVE_LINE_STYLES = [
+    Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine,
+    Qt.PenStyle.DashDotLine, Qt.PenStyle.DotLine,
+]
+
+LINESTYLE_LABELS = {0: "—", 1: "– –", 2: "–·–", 3: "···"}
 
 
 # ── Thermo file utilities ────────────────────────────────────────────
@@ -195,14 +209,23 @@ class PyQtGraphCard(SimpleCardWidget):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(8)
+
+        # Header row: title + export button
+        hdr = QHBoxLayout()
+        hdr.setContentsMargins(0, 0, 0, 0)
         self._title = SubtitleLabel("Reaction Rates vs Temperature")
-        lay.addWidget(self._title)
+        hdr.addWidget(self._title)
+        hdr.addStretch()
+        lay.addLayout(hdr)
 
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setLabel('bottom', 'Temperature', units='K')
         self.plot_widget.setLabel('left', 'log₁₀(k)')
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self.plot_widget.addLegend(offset=(60, 10))
+        self.plot_widget.addLegend(offset=(60, 10),
+            brush=pg.mkBrush('#222630cc'), pen=pg.mkPen('#3a3f4b'),
+            labelTextColor='#e8ecf4', labelTextSize='9pt')
         self.plot_widget.setMinimumHeight(300)
 
         # Crosshair
@@ -254,6 +277,10 @@ class PyQtGraphCard(SimpleCardWidget):
 
     def set_title(self, t):
         self._title.setText(t)
+
+    def add_title_button(self, btn):
+        """Add a button inline with the title (right-aligned)."""
+        self.layout().itemAt(0).layout().addWidget(btn)
 
     def apply_theme(self, dark=True):
         bg = '#1a1d23' if dark else '#f0f2f5'
@@ -385,20 +412,21 @@ class RateTableCard(SimpleCardWidget):
     def _setup_columns(self, temps):
         self.table_temperatures = temps
         n = len(temps)
-        self.table.setColumnCount(3 + n)
-        hdr = ["Reaction", "Pressure (atm)", "Calc Rev?"] + \
+        self.table.setColumnCount(4 + n)
+        hdr = ["Reaction", "Style", "Pressure (atm)", "Calc Rev?"] + \
               [f"k @ {t:.0f}K" for t in temps]
         self.table.setHorizontalHeaderLabels(hdr)
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        self.table.setColumnWidth(0, 350)
+        self.table.setColumnWidth(0, 300)
         h.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(1, 50)
         h.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(2, 100)
+        h.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(3, 90)
         for i in range(n):
-            h.setSectionResizeMode(3 + i, QHeaderView.ResizeMode.Interactive)
-            self.table.setColumnWidth(3 + i, 130)
+            h.setSectionResizeMode(4 + i, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setDefaultSectionSize(36)
         self.table.verticalHeader().setVisible(False)
         self.table.setHorizontalScrollBarPolicy(
@@ -498,6 +526,7 @@ class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CHEMKIN Rate Viewer - v1.3")
+        self.setWindowIcon(QIcon(self._resolve_icon_path()))
         self.resize(1400, 900)
 
         # Thermo data init
@@ -520,7 +549,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self._settings, FluentIcon.SETTING, "Settings",
                             position=NavigationItemPosition.BOTTOM)
 
-        setTheme(Theme.DARK)
+        setTheme(Theme.LIGHT)
 
         # Enable Windows 11 Mica effect (native frosted glass material)
         # Gracefully falls back on Windows 10 or unsupported systems
@@ -530,10 +559,10 @@ class MainWindow(FluentWindow):
             pass  # Mica not available on this system
 
         # Set application palette for all non-QFluentWidgets widgets
-        _apply_app_palette(dark=True)
+        _apply_app_palette(dark=False)
 
-        # Force dark theme on all child widgets
-        self._apply_global_dark_qss()
+        # Apply theme-appropriate QSS
+        self._apply_global_dark_qss(dark=False)
 
         # Load thermo data
         try:
@@ -543,6 +572,20 @@ class MainWindow(FluentWindow):
         except Exception as e:
             self.thermo_data = {}
             self._info(f"Thermo init error: {e}", "error")
+
+    def _resolve_icon_path(self):
+        if getattr(sys, "frozen", False):
+            app_dir = getattr(sys, "_MEIPASS",
+                              os.path.dirname(os.path.abspath(sys.executable)))
+            p = os.path.join(app_dir, "logo.png")
+            if os.path.exists(p):
+                return p
+            p = os.path.join(os.path.dirname(os.path.abspath(sys.executable)),
+                             "logo.png")
+            if os.path.exists(p):
+                return p
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "logo.png")
 
     # ── Home page layout ─────────────────────────────────────────────
 
@@ -564,8 +607,38 @@ class MainWindow(FluentWindow):
         ll.setContentsMargins(16, 16, 16, 16)
         ll.setSpacing(12)
 
-        ll.addWidget(TitleLabel("CHEMKIN Rate Viewer"))
-        ll.addWidget(CaptionLabel("Chemical kinetics mechanism analysis"))
+        # ── Hero header ──
+        hero = QWidget()
+        hero.setObjectName("heroHeader")
+        hero_lay = QHBoxLayout(hero)
+        hero_lay.setContentsMargins(20, 16, 20, 16)
+        hero_lay.setSpacing(14)
+        logo_lbl = QLabel()
+        logo_path = self._resolve_icon_path()
+        if os.path.exists(logo_path):
+            px = QPixmap(logo_path).scaled(44, 44, Qt.AspectRatioMode.KeepAspectRatio,
+                                           Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(px)
+        logo_lbl.setFixedSize(44, 44)
+        hero_lay.addWidget(logo_lbl)
+        txt_col = QVBoxLayout()
+        txt_col.setSpacing(2)
+        tt = TitleLabel("CHEMKIN Rate Viewer")
+        txt_col.addWidget(tt)
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(10)
+        sub_row.addWidget(CaptionLabel("Chemical kinetics mechanism analysis"))
+        badge = QLabel("v1.3")
+        badge.setObjectName("versionBadge")
+        badge.setFixedHeight(20)
+        badge.setStyleSheet(
+            "background-color: #4a90e2; color: #ffffff; padding: 1px 8px; "
+            "border-radius: 10px; font-size: 10px; font-weight: bold;")
+        sub_row.addWidget(badge)
+        sub_row.addStretch()
+        txt_col.addLayout(sub_row)
+        hero_lay.addLayout(txt_col, 1)
+        ll.addWidget(hero)
 
         # CHEMKIN input card
         ic = SimpleCardWidget()
@@ -618,20 +691,24 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         ll.addWidget(cc)
 
         # Buttons
-        self.plot_btn = PrimaryPushButton("Parse, Calculate & Plot")
+        self.plot_btn = PrimaryPushButton(FluentIcon.PLAY, "Parse, Calculate & Plot")
+        self.plot_btn.setMinimumHeight(40)
         self.plot_btn.clicked.connect(self._on_plot_clicked)
         ll.addWidget(self.plot_btn)
 
-        self.detail_btn = PushButton("View Rate Constant Details")
+        self.detail_btn = PushButton(FluentIcon.VIEW, "View Rate Constant Details")
+        self.detail_btn.setMinimumHeight(36)
         self.detail_btn.clicked.connect(self._on_detail_clicked)
         self.detail_btn.setEnabled(False)
         ll.addWidget(self.detail_btn)
 
-        self.rev_btn = PushButton("Experimental Reverse Rate")
+        self.rev_btn = PushButton(FluentIcon.UPDATE, "Experimental Reverse Rate")
+        self.rev_btn.setMinimumHeight(36)
         self.rev_btn.clicked.connect(self._on_exp_reverse_clicked)
         ll.addWidget(self.rev_btn)
 
-        self.save_btn = PushButton("Save Data to Excel")
+        self.save_btn = PushButton(FluentIcon.SAVE, "Save Data to Excel")
+        self.save_btn.setMinimumHeight(36)
         self.save_btn.clicked.connect(self._on_save_clicked)
         self.save_btn.setEnabled(False)
         if not PANDAS_AVAILABLE:
@@ -648,19 +725,34 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         rl.setContentsMargins(8, 8, 8, 8)
         rl.setSpacing(8)
         self.plot_card = PyQtGraphCard()
-        rl.addWidget(self.plot_card, 3)
+        rl.addWidget(self.plot_card, 2)
 
-        # Plot export toolbar
-        export_layout = QHBoxLayout()
-        export_layout.setContentsMargins(0, 2, 0, 0)
-        export_layout.addStretch()
-        export_img_btn = PushButton("Export Plot Image")
+        # Empty state placeholder (hidden after first parse)
+        self.empty_placeholder = QWidget()
+        self.empty_placeholder.setObjectName("emptyPlaceholder")
+        ep_lay = QVBoxLayout(self.empty_placeholder)
+        ep_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.setSpacing(12)
+        ep_icon = QLabel("📊")
+        ep_icon.setStyleSheet("font-size: 48px; background: transparent;")
+        ep_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.addWidget(ep_icon)
+        ep_title = BodyLabel("No Data Yet")
+        ep_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_lay.addWidget(ep_title)
+        ep_hint = CaptionLabel("Paste a CHEMKIN mechanism and click Parse to begin")
+        ep_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ep_hint.setStyleSheet("color: #95a5a6; background: transparent;")
+        ep_lay.addWidget(ep_hint)
+        rl.addWidget(self.empty_placeholder, 3)
+
+        # Export button inline in plot card header
+        export_img_btn = PushButton(FluentIcon.PHOTO, "Export")
         export_img_btn.clicked.connect(self._on_export_image_clicked)
-        export_layout.addWidget(export_img_btn)
-        rl.addLayout(export_layout)
+        self.plot_card.add_title_button(export_img_btn)
 
         self.table_card = RateTableCard()
-        rl.addWidget(self.table_card, 2)
+        rl.addWidget(self.table_card, 3)
         main_lay.addWidget(rw, 1)
 
     # ── Settings page ────────────────────────────────────────────────
@@ -676,7 +768,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         tl.setContentsMargins(16, 16, 16, 16)
         tl.addWidget(BodyLabel("Dark Theme")); tl.addStretch()
         self.theme_sw = SwitchButton()
-        self.theme_sw.setChecked(True)
+        self.theme_sw.setChecked(False)
         self.theme_sw.setOnText("Dark"); self.theme_sw.setOffText("Light")
         self.theme_sw.checkedChanged.connect(self._on_theme_toggled)
         tl.addWidget(self.theme_sw)
@@ -717,6 +809,17 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             }}
             QWidget#leftPanelContent {{
                 background-color: {bg};
+            }}
+
+            /* ── Hero header ── */
+            QWidget#heroHeader {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {card_bg}, stop:1 {bg});
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+            QWidget#heroHeader QLabel {{
+                background: transparent;
             }}
 
             /* ── Card-like widgets (QFrame is the Qt base for SimpleCardWidget) ── */
@@ -809,6 +912,42 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 border: 1px solid #3a3f4b;
             }}
 
+            /* ── Navigation sidebar ── */
+            NavigationInterface {{
+                background-color: {bg};
+                border-right: 1px solid {border};
+            }}
+            NavigationPanel {{
+                background-color: {bg};
+            }}
+            NavigationTreeWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+            NavigationPushButton {{
+                color: {fg};
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                margin: 2px 4px;
+            }}
+            NavigationPushButton:hover {{
+                background-color: {card_bg};
+            }}
+            NavigationPushButton[selected="true"] {{
+                background-color: {accent};
+                color: #ffffff;
+            }}
+            NavigationToolButton {{
+                background-color: transparent;
+                color: {fg};
+                border: none;
+                border-radius: 6px;
+            }}
+            NavigationToolButton:hover {{
+                background-color: {card_bg};
+            }}
+
             /* ── Scrollbars ── */
             QScrollBar:vertical {{
                 background: {bg}; width: 12px; border-radius: 6px;
@@ -842,6 +981,53 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 border: 1px solid {accent};
                 border-radius: 4px;
                 padding: 4px;
+            }}
+
+            /* ── Table header (global) ── */
+            QHeaderView::section {{
+                background-color: {bg};
+                color: {fg};
+                padding: 8px 10px;
+                border: none;
+                border-bottom: 2px solid {accent};
+                font-weight: bold;
+                font-size: 9pt;
+            }}
+            QHeaderView::section:hover {{
+                background-color: {card_bg};
+            }}
+
+            /* ── Splitter handle ── */
+            QSplitter::handle {{
+                background-color: {border};
+            }}
+            QSplitter::handle:hover {{
+                background-color: {accent};
+            }}
+
+            /* ── Table widget (global, for dialogs) ── */
+            QTableWidget {{
+                background-color: {card_bg};
+                alternate-background-color: {input_bg};
+                color: {fg};
+                gridline-color: {border};
+                border: 1px solid {border};
+                border-radius: 8px;
+                selection-background-color: {accent};
+                selection-color: #ffffff;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 9pt;
+            }}
+            QTableWidget::item {{
+                padding: 6px 10px;
+                border-bottom: 1px solid {border};
+            }}
+            QTableWidget::item:hover {{
+                background-color: #3a3f4b;
+            }}
+            QTableWidget::item:selected {{
+                background-color: {accent};
+                color: #ffffff;
             }}
         """
         self.setStyleSheet(qss)
@@ -1014,6 +1200,11 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
     # ── Table population ─────────────────────────────────────────────
 
+    def _show_empty_state(self, show=True):
+        self.empty_placeholder.setVisible(show)
+        self.plot_card.setVisible(not show)
+        self.table_card.setVisible(not show)
+
     def _update_rate_constant_table(self, parsed_reactions):
         self.table_card.table.setUpdatesEnabled(False)
         self.table_card.table.setRowCount(0)
@@ -1042,21 +1233,33 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 item = QTableWidgetItem(dtxt)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 color_hex = self._get_reaction_color(ri, pi)
-                c = QColor(color_hex); c.setAlpha(50)
+                c = QColor(color_hex); c.setAlpha(30)
                 item.setBackground(c)
                 self.table_card.table.setItem(row, 0, item)
 
-                # Col 1: pressure
+                # Col 1: linestyle indicator
+                _, _, ls_idx = self._get_reaction_style(ri, pi)
+                ls_label = LINESTYLE_LABELS.get(ls_idx % len(LINESTYLE_LABELS), "—")
+                ls_item = QTableWidgetItem(ls_label)
+                ls_item.setFlags(ls_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                ls_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                ls_item.setForeground(QColor(color_hex))
+                ls_item.setBackground(c)
+                fnt_style = QFont("Consolas", 10)
+                ls_item.setFont(fnt_style)
+                self.table_card.table.setItem(row, 1, ls_item)
+
+                # Col 2: pressure
                 ptxt = f"{pres:.1f}"
                 if rt in ('PLOG', 'TROE') and use_range:
                     ptxt = f"{pres:.1f}"
                 pitem = QTableWidgetItem(ptxt)
                 pitem.setFlags(pitem.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table_card.table.setItem(row, 1, pitem)
+                self.table_card.table.setItem(row, 2, pitem)
 
-                # Col 2: SwitchButton
+                # Col 3: SwitchButton for reverse rate
                 if rt in ('PLOG', 'TROE') and len(pressures) > 1 and pi > 0:
-                    self.table_card.table.setItem(row, 2, QTableWidgetItem(""))
+                    self.table_card.table.setItem(row, 3, QTableWidgetItem(""))
                 else:
                     sw = SwitchButton()
                     sw.setOnText("Yes"); sw.setOffText("No")
@@ -1064,26 +1267,27 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                         lambda state, r=rd, idx=ri:
                             self._on_reverse_toggled(state, r, idx))
                     ctr = QWidget()
-                    cl = QHBoxLayout(ctr)
-                    cl.addWidget(sw)
-                    cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    cl.setContentsMargins(0, 0, 0, 0)
-                    self.table_card.table.setCellWidget(row, 2, ctr)
+                    cl_h = QHBoxLayout(ctr)
+                    cl_h.addWidget(sw)
+                    cl_h.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    cl_h.setContentsMargins(0, 0, 0, 0)
+                    self.table_card.table.setCellWidget(row, 3, ctr)
 
                 rd['table_rows'].append({
                     'row': row, 'pressure': pres,
                     'pressure_index': pi, 'is_main_row': pi == 0,
+                    'color': color_hex, 'linestyle_index': ls_idx,
                 })
 
-                # Rate constants
+                # Rate constants (col 4+)
                 for i, T_val in enumerate(self.table_card.table_temperatures):
                     kf = self._calculate_rate_for_reaction(rd, T_val, pres)
                     kf_str = ("%.3E" % kf if kf is not None and kf > 0
                               else ("0.000E+00" if kf == 0 else "N/A"))
                     ki = QTableWidgetItem(kf_str)
                     ki.setFlags(ki.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.table_card.table.setItem(row, 3 + i, ki)
-                    rd['original_forward_rates'][f"row_{row}_col_{3+i}"] = kf_str
+                    self.table_card.table.setItem(row, 4 + i, ki)
+                    rd['original_forward_rates'][f"row_{row}_col_{4+i}"] = kf_str
 
                 row += 1
 
@@ -1140,7 +1344,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             for rinfo in rd['table_rows']:
                 r, pres = rinfo['row'], rinfo['pressure']
                 for i, T_val in enumerate(self.table_card.table_temperatures):
-                    ci = 3 + i
+                    ci = 4 + i
                     dH, dS, dG, _, err = get_reaction_thermo_properties(
                         rd, T_val, self.thermo_data)
                     if err:
@@ -1174,7 +1378,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             for rinfo in rd['table_rows']:
                 r = rinfo['row']
                 for i in range(len(self.table_card.table_temperatures)):
-                    ci = 3 + i
+                    ci = 4 + i
                     rk = f"row_{r}_col_{ci}"
                     okf = rd['original_forward_rates'].get(rk, "N/A")
                     ki = QTableWidgetItem(okf)
@@ -1186,7 +1390,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
     def _uncheck_main_switch(self, rd):
         for rinfo in rd.get('table_rows', []):
             if rinfo.get('is_main_row'):
-                ctr = self.table_card.table.cellWidget(rinfo['row'], 2)
+                ctr = self.table_card.table.cellWidget(rinfo['row'], 3)
                 if ctr:
                     lay = ctr.layout()
                     if lay and lay.count() > 0:
@@ -1198,7 +1402,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
     def _get_main_checkbox_for_reaction(self, rd):
         for rinfo in rd.get('table_rows', []):
             if rinfo.get('is_main_row'):
-                ctr = self.table_card.table.cellWidget(rinfo['row'], 2)
+                ctr = self.table_card.table.cellWidget(rinfo['row'], 3)
                 if ctr:
                     lay = ctr.layout()
                     if lay and lay.count() > 0:
@@ -1208,31 +1412,89 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
     # ── Plot styling ─────────────────────────────────────────────────
 
     def _get_reaction_style(self, ri, pi=0):
+        """Return (color_hex, Qt_PenStyle, linestyle_index) for a reaction.
+        When groups=1, each reaction gets a unique (color, style) pair.
+        When groups>1, the intra-group checkbox determines whether groups
+        share color (styles vary) or share style (colors vary)."""
+        nls = len(CURVE_LINE_STYLES)
+
         try:
             gc = max(1, int(self.group_count.text()))
-        except ValueError:
+        except (AttributeError, TypeError, ValueError):
             gc = 1
-        ls_list = ['-', '--', '-.', ':']
-        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-        nc = len(colors)
-        if hasattr(self, 'parsed_reactions') and self.parsed_reactions:
-            tr = len(self.parsed_reactions)
-            rpg = max(1, tr // gc)
-            gi = ri // rpg
-            pig = ri % rpg
+
+        if gc <= 1:
+            slot_count = self._get_style_pressure_slot_count()
+            style_serial = ri * slot_count + pi
+            color = self._get_curve_color(style_serial)
+            ls_idx = style_serial % nls
         else:
-            gi, pig = 0, ri
-        if self.intra_linestyle_cb.isChecked():
-            ls = ls_list[pig % len(ls_list)]
-            ci = gi % nc
+            group_index, position_in_group, _ = self._get_reaction_group_position(ri)
+            if self.intra_linestyle_cb.isChecked():
+                # Intra-group variation: fixed group color, varying styles.
+                color = self._get_curve_color(group_index)
+                ls_idx = (position_in_group + pi) % nls
+            else:
+                # Intra-group variation: varying colors, fixed group style.
+                color = self._get_curve_color(position_in_group + pi)
+                ls_idx = group_index % nls
+        return color, CURVE_LINE_STYLES[ls_idx], ls_idx
+
+    def _get_curve_color(self, index):
+        if index < len(CURVE_COLORS):
+            return CURVE_COLORS[index]
+        hue = (index * 0.618033988749895) % 1.0
+        red, green, blue = colorsys.hsv_to_rgb(hue, 0.68, 0.90)
+        return f"#{int(red * 255):02x}{int(green * 255):02x}{int(blue * 255):02x}"
+
+    def _get_style_pressure_slot_count(self):
+        try:
+            pressures, use_range, _ = self._get_plot_pressure_settings()
+        except Exception:
+            return 1
+        if not use_range:
+            return 1
+        try:
+            return max(1, len(pressures))
+        except TypeError:
+            return 1
+
+    def _get_reaction_group_position(self, ri):
+        total = len(self.parsed_reactions) if getattr(self, 'parsed_reactions', None) else 1
+        try:
+            group_count = max(1, int(self.group_count.text()))
+        except (AttributeError, TypeError, ValueError):
+            group_count = 1
+
+        group_count = min(group_count, max(1, total))
+        if group_count <= 1:
+            return 0, ri, total
+
+        base_size = total // group_count
+        remainder = total % group_count
+        large_group_count = remainder
+        large_group_size = base_size + 1
+        large_group_limit = large_group_count * large_group_size
+
+        if ri < large_group_limit:
+            group_index = ri // large_group_size
+            position_in_group = ri % large_group_size
+            group_size = large_group_size
         else:
-            ls = ls_list[gi % len(ls_list)]
-            ci = (pig + pi) % nc if pi > 0 else pig % nc
-        return colors[ci], ls
+            offset = ri - large_group_limit
+            group_index = large_group_count + offset // base_size
+            position_in_group = offset % base_size
+            group_size = base_size
+
+        return group_index, position_in_group, group_size
 
     def _get_reaction_color(self, ri, pi=0):
-        c, _ = self._get_reaction_style(ri, pi)
+        c, _, _ = self._get_reaction_style(ri, pi)
         return c
+
+    def _get_reaction_linestyle_idx(self, ri, pi=0):
+        _, _, ls = self._get_reaction_style(ri, pi)
+        return ls
 
     # ── Plotting ─────────────────────────────────────────────────────
 
@@ -1262,15 +1524,6 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
         pw.setLabel('bottom', x_label)
 
-        curve_colors = [
-            '#4a90e2', '#e2764a', '#4ae28a', '#e24a90', '#904ae2',
-            '#e2d04a', '#4ae2d0', '#e24a4a', '#8ae24a', '#4a6ee2',
-        ]
-        pen_styles = [
-            Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine,
-            Qt.PenStyle.DashDotLine, Qt.PenStyle.DotLine,
-        ]
-
         n_plotted = 0
         for ri, rd in enumerate(self.parsed_reactions):
             lbl_base = rd.get('equation_string_cleaned',
@@ -1283,8 +1536,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                     k_log = self._calc_k_log_array(rd, T_vals, Pv, is_rev)
                     if k_log is not None and any(~np.isnan(k_log)):
                         pfx = "kr" if is_rev else "kf"
-                        color = curve_colors[(ri + pi) % len(curve_colors)]
-                        style = pen_styles[(ri + pi) % len(pen_styles)]
+                        color, style, _ = self._get_reaction_style(ri, pi)
                         pen = pg.mkPen(color=color, width=2, style=style)
                         pw.plot(x_vals, k_log,
                                 name=f"{pfx}: {lbl_base} @ {Pv:.1f} atm",
@@ -1295,8 +1547,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 k_log = self._calc_k_log_array(rd, T_vals, P_use, is_rev)
                 if k_log is not None and any(~np.isnan(k_log)):
                     pfx = "kr" if is_rev else "kf"
-                    color = curve_colors[ri % len(curve_colors)]
-                    style = pen_styles[ri % len(pen_styles)]
+                    color, style, _ = self._get_reaction_style(ri)
                     pen = pg.mkPen(color=color, width=2, style=style)
                     lbl = f"{pfx}: {lbl_base}"
                     if rt in ('PLOG', 'TROE'):
@@ -1312,6 +1563,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info("CHEMKIN input is empty.", "warning")
             self.table_card.table.setRowCount(0)
             self.plot_card.clear_plot()
+            self._show_empty_state(True)
             return
 
         temps = self._parse_temperature_input()
@@ -1327,6 +1579,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             reactions = parse_chemkin_mechanism(txt)
             if not reactions:
                 self._info("No valid reactions found.", "warning")
+                self._show_empty_state(True)
                 return
             if merge_duplicate_reactions:
                 old_n = len(reactions)
@@ -1336,6 +1589,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info(f"Parsed {len(reactions)} reactions.")
             self._update_rate_constant_table(reactions)
             self._update_plot(reactions)
+            self._show_empty_state(False)
             if PANDAS_AVAILABLE:
                 self.save_btn.setEnabled(True)
             self.detail_btn.setEnabled(True)
@@ -1448,11 +1702,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info("Invalid parameters for export.", "error")
             return
 
-        curve_colors = [
-            '#4a90e2', '#e2764a', '#4ae28a', '#e24a90', '#904ae2',
-            '#e2d04a', '#4ae2d0', '#e24a4a', '#8ae24a', '#4a6ee2',
-        ]
-        ls_list = ['-', '--', '-.', ':']
+        ls_map = ['-', '--', '-.', ':']
 
         for ri, rd in enumerate(self.parsed_reactions):
             lbl_base = rd.get('equation_string_cleaned',
@@ -1465,8 +1715,8 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                 k_log = self._calc_k_log_array(rd, T_vals, Pv, is_rev)
                 if k_log is not None and any(~np.isnan(k_log)):
                     pfx = "kr" if is_rev else "kf"
-                    color = curve_colors[(ri + pi) % len(curve_colors)]
-                    ls = ls_list[(ri + pi) % len(ls_list)]
+                    color, _, ls_idx = self._get_reaction_style(ri, pi)
+                    ls = ls_map[ls_idx % len(ls_map)]
                     lbl = f"{pfx}: {lbl_base}"
                     if rt in ('PLOG', 'TROE') and len(pressures) > 1:
                         lbl += f" @ {Pv:.1f} atm"
@@ -1493,28 +1743,66 @@ class RateConstantDetailDialog(MessageBoxBase):
     def __init__(self, reactions, T_min, T_max, parent=None,
                  calc_func=None, calc_rev_func=None, get_pres_func=None):
         super().__init__(parent)
+        self.setWindowTitle("Rate Constant Details")
+        self.resize(960, 680)
+        self.setMinimumSize(600, 400)
         self.reactions = reactions
-        self.T_min, self.T_max = T_min, T_max
         self.calc_func = calc_func
         self.calc_rev_func = calc_rev_func
         self.get_pres_func = get_pres_func
 
-        self.viewLayout.addWidget(
-            SubtitleLabel(f"T: {T_min:.0f}-{T_max:.0f} K, interval 10 K"))
+        # Parameter input row
+        params_row = QHBoxLayout()
+        params_row.setSpacing(8)
+        params_row.addWidget(CaptionLabel("T min (K):"))
+        self.t_min_edit = LineEdit()
+        self.t_min_edit.setText(str(int(T_min)))
+        self.t_min_edit.setFixedWidth(80)
+        params_row.addWidget(self.t_min_edit)
+        params_row.addWidget(CaptionLabel("T max (K):"))
+        self.t_max_edit = LineEdit()
+        self.t_max_edit.setText(str(int(T_max)))
+        self.t_max_edit.setFixedWidth(80)
+        params_row.addWidget(self.t_max_edit)
+        params_row.addWidget(CaptionLabel("Interval (K):"))
+        self.interval_edit = LineEdit()
+        self.interval_edit.setText("10")
+        self.interval_edit.setFixedWidth(50)
+        params_row.addWidget(self.interval_edit)
+        calc_btn = PrimaryPushButton(FluentIcon.PLAY, "Calculate")
+        calc_btn.clicked.connect(self._on_calc)
+        params_row.addWidget(calc_btn)
+        export_btn = PushButton(FluentIcon.SAVE, "Export Excel")
+        export_btn.clicked.connect(self._export)
+        params_row.addWidget(export_btn)
+        params_row.addStretch()
+        self.viewLayout.addLayout(params_row)
 
         self.table = TableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setItemDelegate(TableItemDelegate(self.table))
         self.viewLayout.addWidget(self.table)
 
-        self._populate()
+        self._populate(int(T_min), int(T_max), 10)
 
-        # Copy shortcut
         sc = QShortcut(QKeySequence.StandardKey.Copy, self.table)
         sc.activated.connect(self._copy)
 
-    def _populate(self):
-        T_vals = np.arange(self.T_min, self.T_max + 10, 10)
+    def _on_calc(self):
+        try:
+            t_min = float(self.t_min_edit.text())
+            t_max = float(self.t_max_edit.text())
+            interval = float(self.interval_edit.text())
+            if t_min <= 0 or t_max <= t_min or interval <= 0:
+                raise ValueError
+        except ValueError:
+            InfoBar.error("Invalid parameters", parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+            return
+        self._populate(t_min, t_max, interval)
+
+    def _populate(self, T_min, T_max, interval):
+        T_vals = np.arange(T_min, T_max + interval, interval)
         P_def = 1.0
         if self.get_pres_func:
             _, _, P_def = self.get_pres_func()
@@ -1550,6 +1838,33 @@ class RateConstantDetailDialog(MessageBoxBase):
                 self.table.setItem(ri, ci, QTableWidgetItem(ks))
         self.table.resizeColumnsToContents()
 
+    def _export(self):
+        if not PANDAS_AVAILABLE:
+            InfoBar.warning("Requires pandas + openpyxl", parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+            return
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Export Rate Details", "rate_details.xlsx",
+            "Excel (*.xlsx);;All (*)")
+        if not fp:
+            return
+        try:
+            data = []
+            tbl = self.table
+            for r in range(tbl.rowCount()):
+                rd = {}
+                for c in range(tbl.columnCount()):
+                    hdr = tbl.horizontalHeaderItem(c).text()
+                    it = tbl.item(r, c)
+                    rd[hdr] = it.text() if it else ""
+                data.append(rd)
+            pd.DataFrame(data).to_excel(fp, index=False)
+            InfoBar.success(f"Exported to {fp}", parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+        except Exception as e:
+            InfoBar.error(f"Export error: {e}", parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
     def _copy(self):
         sel = self.table.selectedRanges()
         if not sel:
@@ -1576,6 +1891,9 @@ class RateConstantDetailDialog(MessageBoxBase):
 class ExperimentalReverseRateDialog(MessageBoxBase):
     def __init__(self, parent=None, thermo_data=None, thermo_fp=None):
         super().__init__(parent)
+        self.setWindowTitle("Experimental Reverse Rate Conversion")
+        self.resize(700, 550)
+        self.setMinimumSize(500, 400)
         self.thermo_data = thermo_data or {}
         self.thermo_filepath = thermo_fp
         self._thermo_file_signature = (
@@ -1703,6 +2021,9 @@ class ExperimentalReverseRateDialog(MessageBoxBase):
 class NasaPolynomialInputDialog(MessageBoxBase):
     def __init__(self, missing_species, thermo_fp, parent=None):
         super().__init__(parent)
+        self.setWindowTitle("Add NASA Polynomial Data")
+        self.resize(640, 550)
+        self.setMinimumSize(500, 400)
         self.missing = missing_species
         self.thermo_filepath = thermo_fp
 

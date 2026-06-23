@@ -1217,6 +1217,8 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self._apply_global_dark_qss(dark)
         self.plot_card.apply_theme(dark)
         self.table_card.apply_theme(dark)
+        if hasattr(self, 'thermo_plot_card'):
+            self._apply_thermo_plot_theme(dark)
         if hasattr(self, 'parsed_reactions'):
             self._update_plot_with_reverse_rates()
 
@@ -1464,6 +1466,19 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info(f"Exported to {path}")
         except Exception as e:
             self._info(f"Export error: {e}", "error")
+
+    def _apply_thermo_plot_theme(self, dark):
+        pw = self.thermo_plot_card.plot_widget
+        if dark:
+            pw.setBackground('#1a1d23')
+            fg = '#e8ecf4'
+        else:
+            pw.setBackground('#f0f2f5')
+            fg = '#2c3e50'
+        for axis_name in ['left', 'bottom']:
+            axis = pw.getAxis(axis_name)
+            axis.setPen(pg.mkPen(color=fg))
+            axis.setTextPen(pg.mkPen(color=fg))
 
     # ── Input parsing ────────────────────────────────────────────────
 

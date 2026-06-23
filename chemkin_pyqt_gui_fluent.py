@@ -85,6 +85,7 @@ try:
         read_nasa_polynomials, append_nasa_polynomial_from_string,
         is_valid_nasa_polynomial_string, reload_thermo_if_changed,
     )
+    from thermo_calculator import calculate_cp_h_s
 except ImportError as e:
     print(f"Error importing modules: {e}")
     parse_chemkin_mechanism = None
@@ -92,6 +93,7 @@ except ImportError as e:
     append_nasa_polynomial_from_string = None
     is_valid_nasa_polynomial_string = None
     reload_thermo_if_changed = None
+    calculate_cp_h_s = None
     calculate_arrhenius_rate = None
     calculate_plog_rate = None
     calculate_troe_rate = None
@@ -1250,6 +1252,41 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._thermo_file_signature = new_sig
             self._info(f"Thermo reloaded: {len(new_data)} species.")
         return changed
+
+    # ── Thermo Compare: parsing ───────────────────────────────────────
+
+    def _on_thermo_parse_clicked(self):
+        text = self.thermo_input.toPlainText().strip()
+        if not text:
+            self._info("Paste NASA polynomial data first.", "warning")
+            return
+        try:
+            lines = text.split('\n')
+            if len(lines) % 4 != 0:
+                self._info(
+                    f"Expected multiple of 4 lines per species, got {len(lines)}.",
+                    "error")
+                return
+            fd, tmp_path = tempfile.mkstemp(suffix='.dat', text=True)
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    f.write(text)
+                self.thermo_species_data = read_nasa_polynomials(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+            if not self.thermo_species_data:
+                self._info("No valid NASA polynomial entries found.", "error")
+                return
+            self._info(f"Loaded {len(self.thermo_species_data)} species.")
+            self._update_thermo_tab_plot_and_table()
+            self._show_thermo_empty_state(False)
+        except Exception as e:
+            self._info(f"Parse error: {e}", "error")
+
+    def _show_thermo_empty_state(self, show=True):
+        self.thermo_empty_placeholder.setVisible(show)
+        self.thermo_plot_card.setVisible(not show)
+        self.thermo_table.setVisible(not show)
 
     # ── Input parsing ────────────────────────────────────────────────
 

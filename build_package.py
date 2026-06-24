@@ -1,4 +1,4 @@
-"""Build CHEMKIN Rate Viewer v2.0 as a directory-mode Windows package."""
+"""Build CHEMKIN Rate Viewer v2.0 as a directory-mode (onedir) Windows package."""
 
 import os
 import shutil
@@ -50,11 +50,11 @@ def main():
     remove_directory_if_exists(package_dir, DIST_DIR)
 
     print("=" * 70)
-    print("Building CHEMKIN Rate Viewer v2.0 (onefile mode)")
+    print("Building CHEMKIN Rate Viewer v2.0 (onedir mode)")
     print("=" * 70)
     PyInstaller.__main__.run(["--clean", "--noconfirm", SPEC_PATH])
 
-    executable = os.path.join(DIST_DIR, "CHEMKIN_RateViewer.exe")
+    executable = os.path.join(package_dir, "CHEMKIN_RateViewer.exe")
     if not os.path.exists(executable):
         raise FileNotFoundError(f"Packaged executable not found: {executable}")
 

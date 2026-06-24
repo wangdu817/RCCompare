@@ -56,3 +56,12 @@ chemkin_pyqt_gui.build/
 chemkin_pyqt_gui.dist/
 *.pyc
 .superpowers/
+
+# Internal planning/spec docs (not for public repo)
+docs/superpowers/
+
+# opencode local state
+.opencode/
+
+# Brainstorming mockups
+mockup-*.html

@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSizePolicy, QFileDialog, QMenu, QColorDialog, QLabel,
+    QHeaderView, QSizePolicy, QFileDialog, QMenu, QColorDialog, QLabel, QDialog,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor, QAction, QKeySequence, QShortcut, QPalette, QIcon, QPixmap
@@ -252,8 +252,13 @@ class PyQtGraphCard(SimpleCardWidget):
         lay.addWidget(self.plot_widget, 1)
 
     def _on_mouse_moved(self, pos):
-        vb = self.plot_widget.getViewBox()
+        try:
+            vb = self.plot_widget.getViewBox()
+        except Exception:
+            return
         if not self.plot_widget.sceneBoundingRect().contains(pos):
+            return
+        if vb is None:
             return
         mouse_point = vb.mapSceneToView(pos)
         x, y = mouse_point.x(), mouse_point.y()
@@ -647,6 +652,8 @@ class MainWindow(FluentWindow):
         sub_row.addWidget(badge)
         sub_row.addStretch()
         txt_col.addLayout(sub_row)
+        author_lbl = CaptionLabel("王杜 · wangdu@iet.cn · 中科院工程热物理研究所")
+        txt_col.addWidget(author_lbl)
         hero_lay.addLayout(txt_col, 1)
         ll.addWidget(hero)
 
@@ -790,6 +797,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         al.addWidget(StrongBodyLabel("About"))
         al.addWidget(BodyLabel("CHEMKIN Rate Viewer v2.0"))
         al.addWidget(CaptionLabel("QFluentWidgets Edition"))
+        al.addWidget(CaptionLabel("作者：王杜  (wangdu@iet.cn)"))
         al.addWidget(CaptionLabel("中科院工程热物理研究所"))
         lay.addWidget(ac)
         lay.addStretch()
@@ -844,6 +852,9 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             "border-radius: 10px; font-size: 10px; font-weight: bold;")
         sub_row.addWidget(badge)
         sub_row.addStretch()
+        txt_col.addLayout(sub_row)
+        author_lbl = CaptionLabel("王杜 · wangdu@iet.cn · 中科院工程热物理研究所")
+        txt_col.addWidget(author_lbl)
         txt_col.addLayout(sub_row)
         hero_lay.addLayout(txt_col, 1)
         ll.addWidget(hero)
@@ -906,17 +917,12 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self.thermo_parse_btn.clicked.connect(self._on_thermo_parse_clicked)
         ll.addWidget(self.thermo_parse_btn)
 
-        # Export Data button
-        self.thermo_export_data_btn = PushButton(FluentIcon.SAVE, "Export Data")
-        self.thermo_export_data_btn.setMinimumHeight(36)
-        self.thermo_export_data_btn.clicked.connect(self._on_thermo_save_clicked)
-        ll.addWidget(self.thermo_export_data_btn)
-
-        # Export Data button
-        self.thermo_save_btn = PushButton(FluentIcon.SAVE, "Export Data")
-        self.thermo_save_btn.setMinimumHeight(36)
-        self.thermo_save_btn.clicked.connect(self._on_thermo_save_clicked)
-        ll.addWidget(self.thermo_save_btn)
+        # View Thermo Details button
+        self.thermo_detail_btn = PushButton(FluentIcon.VIEW, "View Thermo Details")
+        self.thermo_detail_btn.setMinimumHeight(36)
+        self.thermo_detail_btn.clicked.connect(self._on_thermo_detail_clicked)
+        self.thermo_detail_btn.setEnabled(False)
+        ll.addWidget(self.thermo_detail_btn)
         ll.addStretch()
         scroll.setWidget(lw)
         main_lay.addWidget(scroll)
@@ -1298,6 +1304,8 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             self._info(f"Loaded {len(self.thermo_species_data)} species.")
             self._update_thermo_tab_plot_and_table()
             self._show_thermo_empty_state(False)
+            self.thermo_detail_btn.setEnabled(True)
+            self.thermo_detail_btn.setEnabled(True)
         except Exception as e:
             self._info(f"Parse error: {e}", "error")
 
@@ -1525,59 +1533,19 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         except Exception as e:
             self._info(f"Export error: {e}", "error")
 
-    def _on_thermo_save_clicked(self):
-        if not PANDAS_AVAILABLE:
-            self._info("Requires pandas + openpyxl.", "warning")
-            return
+    def _on_thermo_detail_clicked(self):
         if not getattr(self, 'thermo_species_data', None):
-            self._info("No data to export.", "warning")
-            return
-        fp, _ = QFileDialog.getSaveFileName(
-            self, "Save Thermo Data", "thermo_data.xlsx",
-            "Excel (*.xlsx);;All (*)")
-        if not fp:
+            self._info("No data. Parse NASA polynomial data first.", "warning")
             return
         try:
-            tbl = self.thermo_table
-            data = []
-            for r in range(tbl.rowCount()):
-                rd = {}
-                for c in range(tbl.columnCount()):
-                    hdr = tbl.horizontalHeaderItem(c).text()
-                    it = tbl.item(r, c)
-                    rd[hdr] = it.text() if it else ""
-                data.append(rd)
-            pd.DataFrame(data).to_excel(fp, index=False)
-            self._info(f"Exported to {fp}")
-        except Exception as e:
-            self._info(f"Export error: {e}", "error")
-
-    def _on_thermo_save_clicked(self):
-        if not PANDAS_AVAILABLE:
-            self._info("Requires pandas + openpyxl.", "warning")
+            T_min = float(self.thermo_tmin.text())
+            T_max = float(self.thermo_tmax.text())
+        except ValueError:
+            self._info("Invalid temperature range.", "error")
             return
-        if not getattr(self, 'thermo_species_data', None):
-            self._info("No data to export.", "warning")
-            return
-        fp, _ = QFileDialog.getSaveFileName(
-            self, "Save Thermo Data", "thermo_data.xlsx",
-            "Excel (*.xlsx);;All (*)")
-        if not fp:
-            return
-        try:
-            data = []
-            tbl = self.thermo_table
-            for r in range(tbl.rowCount()):
-                rd = {}
-                for c in range(tbl.columnCount()):
-                    hdr = tbl.horizontalHeaderItem(c).text()
-                    it = tbl.item(r, c)
-                    rd[hdr] = it.text() if it else ""
-                data.append(rd)
-            pd.DataFrame(data).to_excel(fp, index=False)
-            self._info(f"Exported to {fp}")
-        except Exception as e:
-            self._info(f"Export error: {e}", "error")
+        dlg = ThermoDetailDialog(
+            self.thermo_species_data, T_min, T_max, self._thermo_tab_idx, self)
+        dlg.exec()
 
     def _apply_thermo_plot_theme(self, dark):
         pw = self.thermo_plot_card.plot_widget
@@ -2248,7 +2216,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
 # ── Dialogs ──────────────────────────────────────────────────────────
 
-class RateConstantDetailDialog(MessageBoxBase):
+class RateConstantDetailDialog(QDialog):
     def __init__(self, reactions, T_min, T_max, parent=None,
                  calc_func=None, calc_rev_func=None, get_pres_func=None):
         super().__init__(parent)
@@ -2259,6 +2227,10 @@ class RateConstantDetailDialog(MessageBoxBase):
         self.calc_func = calc_func
         self.calc_rev_func = calc_rev_func
         self.get_pres_func = get_pres_func
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
 
         # Parameter input row
         params_row = QHBoxLayout()
@@ -2283,14 +2255,25 @@ class RateConstantDetailDialog(MessageBoxBase):
         params_row.addWidget(calc_btn)
         export_btn = PushButton(FluentIcon.SAVE, "Export Excel")
         export_btn.clicked.connect(self._export)
+        if not PANDAS_AVAILABLE:
+            export_btn.setToolTip("Requires pandas + openpyxl")
+            export_btn.setEnabled(False)
         params_row.addWidget(export_btn)
         params_row.addStretch()
-        self.viewLayout.addLayout(params_row)
+        layout.addLayout(params_row)
 
         self.table = TableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setItemDelegate(TableItemDelegate(self.table))
-        self.viewLayout.addWidget(self.table)
+        layout.addWidget(self.table)
+
+        # Close button row
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_btn = PushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
 
         self._populate(int(T_min), int(T_max), 10)
 
@@ -2354,6 +2337,211 @@ class RateConstantDetailDialog(MessageBoxBase):
             return
         fp, _ = QFileDialog.getSaveFileName(
             self, "Export Rate Details", "rate_details.xlsx",
+            "Excel (*.xlsx);;All (*)")
+        if not fp:
+            return
+        try:
+            data = []
+            tbl = self.table
+            for r in range(tbl.rowCount()):
+                rd = {}
+                for c in range(tbl.columnCount()):
+                    hdr = tbl.horizontalHeaderItem(c).text()
+                    it = tbl.item(r, c)
+                    rd[hdr] = it.text() if it else ""
+                data.append(rd)
+            pd.DataFrame(data).to_excel(fp, index=False)
+            InfoBar.success(f"Exported to {fp}", parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+        except Exception as e:
+            InfoBar.error(f"Export error: {e}", parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+    def _copy(self):
+        sel = self.table.selectedRanges()
+        if not sel:
+            return
+        mr = min(r.topRow() for r in sel)
+        xr = max(r.bottomRow() for r in sel)
+        mc = min(r.leftColumn() for r in sel)
+        xc = max(r.rightColumn() for r in sel)
+        rows = []
+        hdr = []
+        for c in range(mc, xc + 1):
+            h = self.table.horizontalHeaderItem(c)
+            hdr.append(h.text() if h else "")
+        rows.append('\t'.join(hdr))
+        for r in range(mr, xr + 1):
+            rd = []
+            for c in range(mc, xc + 1):
+                it = self.table.item(r, c)
+                rd.append(it.text() if it else "")
+            rows.append('\t'.join(rd))
+        QApplication.clipboard().setText('\n'.join(rows))
+
+
+class ThermoDetailDialog(QDialog):
+    """Dialog showing detailed thermo properties (H/S/Cp) at configurable
+    temperature range and interval. User-resizable via native QDialog window."""
+
+    PROPERTY_LABELS = ["H (kJ/mol)", "S (J/mol·K)", "Cp (J/mol·K)"]
+
+    def __init__(self, species_data, T_min, T_max, tab_idx, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Thermo Property Details")
+        self.resize(960, 680)
+        self.setMinimumSize(600, 400)
+        self.species_data = species_data
+        self._tab_idx = tab_idx
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        # Property selector (SegmentedWidget)
+        prop_row = QHBoxLayout()
+        prop_row.setSpacing(8)
+        prop_row.addWidget(CaptionLabel("Property:"))
+        self.prop_seg = SegmentedWidget()
+        for i, label in enumerate(self.PROPERTY_LABELS):
+            self.prop_seg.addItem(routeKey=str(i), text=label)
+        self.prop_seg.setCurrentItem(str(tab_idx))
+        self.prop_seg.currentItemChanged.connect(self._on_prop_changed)
+        prop_row.addWidget(self.prop_seg)
+        prop_row.addStretch()
+        layout.addLayout(prop_row)
+
+        # Parameter input row
+        params_row = QHBoxLayout()
+        params_row.setSpacing(8)
+        params_row.addWidget(CaptionLabel("T min (K):"))
+        self.t_min_edit = LineEdit()
+        self.t_min_edit.setText(str(int(T_min)))
+        self.t_min_edit.setFixedWidth(80)
+        params_row.addWidget(self.t_min_edit)
+        params_row.addWidget(CaptionLabel("T max (K):"))
+        self.t_max_edit = LineEdit()
+        self.t_max_edit.setText(str(int(T_max)))
+        self.t_max_edit.setFixedWidth(80)
+        params_row.addWidget(self.t_max_edit)
+        params_row.addWidget(CaptionLabel("Interval (K):"))
+        self.interval_edit = LineEdit()
+        self.interval_edit.setText("10")
+        self.interval_edit.setFixedWidth(50)
+        params_row.addWidget(self.interval_edit)
+        calc_btn = PrimaryPushButton(FluentIcon.PLAY, "Calculate")
+        calc_btn.clicked.connect(self._on_calc)
+        params_row.addWidget(calc_btn)
+        export_btn = PushButton(FluentIcon.SAVE, "Export Excel")
+        export_btn.clicked.connect(self._export)
+        if not PANDAS_AVAILABLE:
+            export_btn.setToolTip("Requires pandas + openpyxl")
+            export_btn.setEnabled(False)
+        params_row.addWidget(export_btn)
+        params_row.addStretch()
+        layout.addLayout(params_row)
+
+        # Table
+        self.table = TableWidget()
+        self.table.setAlternatingRowColors(True)
+        self.table.setItemDelegate(TableItemDelegate(self.table))
+        self.table.setSelectionMode(TableWidget.SelectionMode.ExtendedSelection)
+        layout.addWidget(self.table)
+
+        # Close button row
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_btn = PushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
+
+        self._populate(int(T_min), int(T_max), 10)
+
+        sc = QShortcut(QKeySequence.StandardKey.Copy, self.table)
+        sc.activated.connect(self._copy)
+
+    def _on_prop_changed(self, key):
+        self._tab_idx = int(key)
+        try:
+            t_min = float(self.t_min_edit.text())
+            t_max = float(self.t_max_edit.text())
+            interval = float(self.interval_edit.text())
+        except ValueError:
+            return
+        self._populate(t_min, t_max, interval)
+
+    def _on_calc(self):
+        try:
+            t_min = float(self.t_min_edit.text())
+            t_max = float(self.t_max_edit.text())
+            interval = float(self.interval_edit.text())
+            if t_min <= 0 or t_max <= t_min or interval <= 0:
+                raise ValueError
+        except ValueError:
+            InfoBar.error("Invalid parameters", parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+            return
+        self._populate(t_min, t_max, interval)
+
+    def _get_coeffs(self, species_sd, T):
+        T_ranges = species_sd.get('T_ranges', [])
+        coeffs_list = species_sd.get('coeffs', [])
+        if len(T_ranges) != 2 or len(coeffs_list) != 2:
+            return None
+        if T_ranges[1][0] <= T <= T_ranges[1][1]:
+            return coeffs_list[0]
+        elif T_ranges[0][0] <= T < T_ranges[1][0]:
+            return coeffs_list[1]
+        return None
+
+    def _populate(self, T_min, T_max, interval):
+        T_vals = np.arange(T_min, T_max + interval, interval)
+        species_names = list(self.species_data.keys())
+        cols = ["T (K)"] + species_names
+
+        self.table.setRowCount(len(T_vals))
+        self.table.setColumnCount(len(cols))
+        self.table.setHorizontalHeaderLabels(cols)
+        self.table.verticalHeader().setVisible(False)
+
+        for ri, T in enumerate(T_vals):
+            T_item = QTableWidgetItem(f"{T:.1f}")
+            T_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(ri, 0, T_item)
+
+            for ci, sn in enumerate(species_names, 1):
+                sd = self.species_data[sn]
+                coeffs = self._get_coeffs(sd, T)
+                val = None
+                if coeffs is not None:
+                    Cp, H, S = calculate_cp_h_s(T, coeffs)
+                    if Cp is not None:
+                        if self._tab_idx == 0:
+                            val = H / 1000.0
+                        elif self._tab_idx == 1:
+                            val = S
+                        else:
+                            val = Cp
+                item = QTableWidgetItem(
+                    f"{val:.3f}" if val is not None else "N/A")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                self.table.setItem(ri, ci, item)
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for i in range(1, len(cols)):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+
+    def _export(self):
+        if not PANDAS_AVAILABLE:
+            InfoBar.warning("Requires pandas + openpyxl", parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+            return
+        prop_name = self.PROPERTY_LABELS[self._tab_idx]
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Export Thermo Details",
+            f"thermo_{prop_name.split()[0].lower()}_details.xlsx",
             "Excel (*.xlsx);;All (*)")
         if not fp:
             return

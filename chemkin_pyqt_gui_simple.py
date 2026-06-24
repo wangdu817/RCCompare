@@ -638,7 +638,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
 
     def _show_about_dialog(self):
         """Show about dialog"""
-        QMessageBox.about(self, "关于", "CHEMKIN Rate Viewer v2.0\n\n化学反应动力学机理分析工具\n\n开发者：王杜\n单位：中科院工程热物理研究所")
+        QMessageBox.about(self, "关于", "CHEMKIN Rate Viewer v2.0\n\n化学反应动力学机理分析工具\n\n开发者：王杜\n邮箱：wangdu@iet.cn\n单位：中科院工程热物理研究所")
 
     def _setup_rate_table_widget_appearance(self):
         """设置表格外观和列宽"""

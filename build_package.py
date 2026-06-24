@@ -11,7 +11,7 @@ import PyInstaller.__main__
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 BUILD_DIR = os.path.join(ROOT_DIR, "build")
-SPEC_PATH = os.path.join(ROOT_DIR, "CHEMKIN_RateCalculator.spec")
+SPEC_PATH = os.path.join(ROOT_DIR, "CHEMKIN_RateViewer.spec")
 
 
 def remove_directory_if_exists(path, allowed_root):
@@ -46,15 +46,15 @@ def main():
     configure_conda_runtime_dll_path()
 
     remove_directory_if_exists(BUILD_DIR, ROOT_DIR)
-    package_dir = os.path.join(DIST_DIR, "CHEMKIN_RateCalculator")
+    package_dir = os.path.join(DIST_DIR, "CHEMKIN_RateViewer")
     remove_directory_if_exists(package_dir, DIST_DIR)
 
     print("=" * 70)
-    print("Building CHEMKIN Rate Viewer v2.0 (directory mode)")
+    print("Building CHEMKIN Rate Viewer v2.0 (onefile mode)")
     print("=" * 70)
     PyInstaller.__main__.run(["--clean", "--noconfirm", SPEC_PATH])
 
-    executable = os.path.join(package_dir, "CHEMKIN_RateCalculator.exe")
+    executable = os.path.join(DIST_DIR, "CHEMKIN_RateViewer.exe")
     if not os.path.exists(executable):
         raise FileNotFoundError(f"Packaged executable not found: {executable}")
 

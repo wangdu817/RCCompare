@@ -252,7 +252,7 @@ class PyQtGraphCard(SimpleCardWidget):
         lay.addWidget(self.plot_widget, 1)
 
     def _on_mouse_moved(self, pos):
-        vb = self.plot_widget.vb
+        vb = self.plot_widget.getViewBox()
         if not self.plot_widget.sceneBoundingRect().contains(pos):
             return
         mouse_point = vb.mapSceneToView(pos)
@@ -905,6 +905,18 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self.thermo_parse_btn.setMinimumHeight(40)
         self.thermo_parse_btn.clicked.connect(self._on_thermo_parse_clicked)
         ll.addWidget(self.thermo_parse_btn)
+
+        # Export Data button
+        self.thermo_export_data_btn = PushButton(FluentIcon.SAVE, "Export Data")
+        self.thermo_export_data_btn.setMinimumHeight(36)
+        self.thermo_export_data_btn.clicked.connect(self._on_thermo_save_clicked)
+        ll.addWidget(self.thermo_export_data_btn)
+
+        # Export Data button
+        self.thermo_save_btn = PushButton(FluentIcon.SAVE, "Export Data")
+        self.thermo_save_btn.setMinimumHeight(36)
+        self.thermo_save_btn.clicked.connect(self._on_thermo_save_clicked)
+        ll.addWidget(self.thermo_save_btn)
         ll.addStretch()
         scroll.setWidget(lw)
         main_lay.addWidget(scroll)
@@ -1443,11 +1455,16 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         t.setUpdatesEnabled(False)
         t.clear()
         n_rows = len(table_temps)
-        n_cols = 2 + len(species_names)
+        n_cols = 1 + len(species_names)
         t.setRowCount(n_rows)
         t.setColumnCount(n_cols)
-        t.setHorizontalHeaderLabels(
-            ["T (K)"] + ["Style"] + species_names)
+        # Build headers: "T (K)" + species names with style indicator prefix
+        headers = ["T (K)"]
+        for si, sn in enumerate(species_names):
+            _, _, ls_idx = self._get_thermo_style(si)
+            style_label = LINESTYLE_LABELS.get(ls_idx, "—")
+            headers.append(f"{sn}  {style_label}")
+        t.setHorizontalHeaderLabels(headers)
         t.verticalHeader().setVisible(False)
 
         for row_i, T in enumerate(table_temps):
@@ -1469,7 +1486,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                         else:
                             val = Cp
 
-                col = 2 + si
+                col = 1 + si
                 item = QTableWidgetItem(
                     f"{val:.2f}" if val is not None else "N/A")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
@@ -1478,20 +1495,9 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                     item.setForeground(color)
                 t.setItem(row_i, col, item)
 
-        for si in range(len(species_names)):
-            if si >= n_rows:
-                break
-            _, _, ls_idx = self._get_thermo_style(si)
-            style_item = QTableWidgetItem(LINESTYLE_LABELS.get(ls_idx, "—"))
-            style_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            color = QColor(self._get_thermo_style(si)[0])
-            style_item.setForeground(color)
-            t.setItem(si, 1, style_item)
-
         header = t.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        for col in range(2, n_cols):
+        for col in range(1, n_cols):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         t.setUpdatesEnabled(True)
 
@@ -1516,6 +1522,60 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             ex.parameters()['width'] = 1600
             ex.export(path)
             self._info(f"Exported to {path}")
+        except Exception as e:
+            self._info(f"Export error: {e}", "error")
+
+    def _on_thermo_save_clicked(self):
+        if not PANDAS_AVAILABLE:
+            self._info("Requires pandas + openpyxl.", "warning")
+            return
+        if not getattr(self, 'thermo_species_data', None):
+            self._info("No data to export.", "warning")
+            return
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Save Thermo Data", "thermo_data.xlsx",
+            "Excel (*.xlsx);;All (*)")
+        if not fp:
+            return
+        try:
+            tbl = self.thermo_table
+            data = []
+            for r in range(tbl.rowCount()):
+                rd = {}
+                for c in range(tbl.columnCount()):
+                    hdr = tbl.horizontalHeaderItem(c).text()
+                    it = tbl.item(r, c)
+                    rd[hdr] = it.text() if it else ""
+                data.append(rd)
+            pd.DataFrame(data).to_excel(fp, index=False)
+            self._info(f"Exported to {fp}")
+        except Exception as e:
+            self._info(f"Export error: {e}", "error")
+
+    def _on_thermo_save_clicked(self):
+        if not PANDAS_AVAILABLE:
+            self._info("Requires pandas + openpyxl.", "warning")
+            return
+        if not getattr(self, 'thermo_species_data', None):
+            self._info("No data to export.", "warning")
+            return
+        fp, _ = QFileDialog.getSaveFileName(
+            self, "Save Thermo Data", "thermo_data.xlsx",
+            "Excel (*.xlsx);;All (*)")
+        if not fp:
+            return
+        try:
+            data = []
+            tbl = self.thermo_table
+            for r in range(tbl.rowCount()):
+                rd = {}
+                for c in range(tbl.columnCount()):
+                    hdr = tbl.horizontalHeaderItem(c).text()
+                    it = tbl.item(r, c)
+                    rd[hdr] = it.text() if it else ""
+                data.append(rd)
+            pd.DataFrame(data).to_excel(fp, index=False)
+            self._info(f"Exported to {fp}")
         except Exception as e:
             self._info(f"Export error: {e}", "error")
 

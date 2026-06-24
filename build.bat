@@ -7,7 +7,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building CHEMKIN Rate Viewer v1.3 as a directory package...
+echo Building CHEMKIN Rate Viewer v2.0 as a directory package...
 python "%~dp0build_package.py"
 if errorlevel 1 (
     echo ERROR: package build failed.

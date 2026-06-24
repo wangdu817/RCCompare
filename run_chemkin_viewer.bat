@@ -1,10 +1,10 @@
 @echo off
 REM CHEMKIN Rate Viewer 启动脚本
-REM 版本: v1.3
+REM 版本: v2.0
 REM 日期: 2026-05-26
 
 echo ========================================
-echo CHEMKIN Rate Viewer v1.3
+echo CHEMKIN Rate Viewer v2.0
 echo ========================================
 echo.
 

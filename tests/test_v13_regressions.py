@@ -6,7 +6,7 @@ import types
 import unittest
 from unittest import mock
 
-import chemkin_pyqt_gui_simple as gui
+import chemkin_pyqt_gui_fluent as gui
 from rate_calculator import calculate_arrhenius_rate, calculate_plog_rate
 
 
@@ -173,19 +173,21 @@ END
 
 
 class TestDisplayedVersion(unittest.TestCase):
-    def test_gui_source_displays_only_v13_release_version(self):
+    def test_gui_source_displays_only_v20_release_version(self):
         source_text = pathlib.Path(gui.__file__).read_text(encoding="utf-8")
 
-        self.assertIn("CHEMKIN Rate Viewer - v1.3", source_text)
-        self.assertIn("CHEMKIN Rate Viewer v1.3", source_text)
+        self.assertIn("CHEMKIN Rate Viewer - v2.0", source_text)
+        self.assertIn("CHEMKIN Rate Viewer v2.0", source_text)
+        self.assertNotIn("CHEMKIN Rate Viewer - v1.3", source_text)
         self.assertNotIn("CHEMKIN Rate Viewer - v1.2", source_text)
         self.assertNotIn("CHEMKIN Rate Viewer v1.0", source_text)
 
-    def test_launcher_displays_v13_release_version(self):
+    def test_launcher_displays_v20_release_version(self):
         launcher_path = pathlib.Path(gui.__file__).with_name("run_chemkin_viewer.bat")
         launcher_text = launcher_path.read_text(encoding="utf-8")
 
-        self.assertIn("v1.3", launcher_text)
+        self.assertIn("v2.0", launcher_text)
+        self.assertNotIn("v1.3", launcher_text)
         self.assertNotIn("v1.1", launcher_text)
 
 

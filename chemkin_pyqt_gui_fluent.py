@@ -529,7 +529,7 @@ def _apply_app_palette(dark=True):
 class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CHEMKIN Rate Viewer - v1.3")
+        self.setWindowTitle("CHEMKIN Rate Viewer - v2.0")
         self.setWindowIcon(QIcon(self._resolve_icon_path()))
         self.resize(1400, 900)
 
@@ -554,7 +554,7 @@ class MainWindow(FluentWindow):
 
         self.addSubInterface(self._home, FluentIcon.HOME, "Rate",
                             position=NavigationItemPosition.TOP)
-        self.addSubInterface(self._thermo_compare, FluentIcon.LINK, "Thermo Compare",
+        self.addSubInterface(self._thermo_compare, FluentIcon.CALORIES, "Thermo Compare",
                             position=NavigationItemPosition.TOP)
         self.addSubInterface(self._settings, FluentIcon.SETTING, "Settings",
                             position=NavigationItemPosition.BOTTOM)
@@ -638,7 +638,7 @@ class MainWindow(FluentWindow):
         sub_row = QHBoxLayout()
         sub_row.setSpacing(10)
         sub_row.addWidget(CaptionLabel("Chemical kinetics mechanism analysis"))
-        badge = QLabel("v1.3")
+        badge = QLabel("v2.0")
         badge.setObjectName("versionBadge")
         badge.setFixedHeight(20)
         badge.setStyleSheet(
@@ -788,7 +788,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         al = QVBoxLayout(ac)
         al.setContentsMargins(16, 16, 16, 16)
         al.addWidget(StrongBodyLabel("About"))
-        al.addWidget(BodyLabel("CHEMKIN Rate Viewer v1.3"))
+        al.addWidget(BodyLabel("CHEMKIN Rate Viewer v2.0"))
         al.addWidget(CaptionLabel("QFluentWidgets Edition"))
         al.addWidget(CaptionLabel("中科院工程热物理研究所"))
         lay.addWidget(ac)
@@ -836,7 +836,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         sub_row = QHBoxLayout()
         sub_row.setSpacing(10)
         sub_row.addWidget(CaptionLabel("NASA Polynomial Comparison"))
-        badge = QLabel("v1.3")
+        badge = QLabel("v2.0")
         badge.setObjectName("versionBadge")
         badge.setFixedHeight(20)
         badge.setStyleSheet(
@@ -888,12 +888,16 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
         self.thermo_table_temps = LineEdit()
         self.thermo_table_temps.setText(
             "300, 500, 700, 1000, 1500, 2000, 2500, 3000")
+        self.thermo_group_count = LineEdit(); self.thermo_group_count.setText("1")
+        self.thermo_intra_linestyle_cb = CheckBox("Intra-group linestyle variation")
         for lbl, w in [("T min (K)", self.thermo_tmin),
                         ("T max (K)", self.thermo_tmax),
-                        ("Table temps (K)", self.thermo_table_temps)]:
+                        ("Table temps (K)", self.thermo_table_temps),
+                        ("Groups", self.thermo_group_count)]:
             r = QHBoxLayout()
             r.addWidget(CaptionLabel(lbl)); r.addWidget(w); r.addStretch()
             cl.addLayout(r)
+        cl.addWidget(self.thermo_intra_linestyle_cb)
         ll.addWidget(cc)
 
         # Parse button
@@ -1301,11 +1305,59 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             return coeffs_list[1]
         return None
 
+    def _get_thermo_group_position(self, si):
+        total = len(self.thermo_species_data) if getattr(self, 'thermo_species_data', None) else 1
+        try:
+            group_count = max(1, int(self.thermo_group_count.text()))
+        except (AttributeError, TypeError, ValueError):
+            group_count = 1
+        group_count = min(group_count, max(1, total))
+        if group_count <= 1:
+            return 0, si, total
+        base_size = total // group_count
+        remainder = total % group_count
+        large_group_count = remainder
+        large_group_size = base_size + 1
+        large_group_limit = large_group_count * large_group_size
+        if si < large_group_limit:
+            group_index = si // large_group_size
+            position_in_group = si % large_group_size
+            group_size = large_group_size
+        else:
+            offset = si - large_group_limit
+            group_index = large_group_count + offset // base_size
+            position_in_group = offset % base_size
+            group_size = base_size
+        return group_index, position_in_group, group_size
+
+    def _get_thermo_curve_color(self, index):
+        if index < len(CURVE_COLORS):
+            return CURVE_COLORS[index]
+        hue = (index * 0.618033988749895) % 1.0
+        red, green, blue = colorsys.hsv_to_rgb(hue, 0.68, 0.90)
+        return f"#{int(red * 255):02x}{int(green * 255):02x}{int(blue * 255):02x}"
+
     def _get_thermo_style(self, species_index):
-        n_colors = len(CURVE_COLORS)
-        n_styles = len(CURVE_LINE_STYLES)
-        color = CURVE_COLORS[species_index % n_colors]
-        ls_idx = species_index % n_styles
+        """Return (color_hex, Qt_PenStyle, linestyle_index) for a species.
+        When groups=1, each species gets a unique (color, style) pair.
+        When groups>1, the intra-group checkbox determines whether groups
+        share color (styles vary) or share style (colors vary)."""
+        nls = len(CURVE_LINE_STYLES)
+        try:
+            gc = max(1, int(self.thermo_group_count.text()))
+        except (AttributeError, TypeError, ValueError):
+            gc = 1
+        if gc <= 1:
+            color = self._get_thermo_curve_color(species_index)
+            ls_idx = species_index % nls
+        else:
+            group_index, position_in_group, _ = self._get_thermo_group_position(species_index)
+            if self.thermo_intra_linestyle_cb.isChecked():
+                color = self._get_thermo_curve_color(group_index)
+                ls_idx = position_in_group % nls
+            else:
+                color = self._get_thermo_curve_color(position_in_group)
+                ls_idx = group_index % nls
         return color, CURVE_LINE_STYLES[ls_idx], ls_idx
 
     def _update_thermo_tab_plot_and_table(self):
@@ -1422,7 +1474,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
                     f"{val:.2f}" if val is not None else "N/A")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
                 if val is not None:
-                    color = QColor(CURVE_COLORS[si % len(CURVE_COLORS)])
+                    color = QColor(self._get_thermo_style(si)[0])
                     item.setForeground(color)
                 t.setItem(row_i, col, item)
 
@@ -1432,7 +1484,7 @@ H + O2 (+M) = HO2 (+M)    1.475E12  0.6  0.0
             _, _, ls_idx = self._get_thermo_style(si)
             style_item = QTableWidgetItem(LINESTYLE_LABELS.get(ls_idx, "—"))
             style_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            color = QColor(CURVE_COLORS[si % len(CURVE_COLORS)])
+            color = QColor(self._get_thermo_style(si)[0])
             style_item.setForeground(color)
             t.setItem(si, 1, style_item)
 

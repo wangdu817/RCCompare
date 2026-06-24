@@ -1,4 +1,4 @@
-"""Build CHEMKIN Rate Viewer v1.3 as a directory-mode Windows package."""
+"""Build CHEMKIN Rate Viewer v2.0 as a directory-mode Windows package."""
 
 import os
 import shutil
@@ -50,7 +50,7 @@ def main():
     remove_directory_if_exists(package_dir, DIST_DIR)
 
     print("=" * 70)
-    print("Building CHEMKIN Rate Viewer v1.3 (directory mode)")
+    print("Building CHEMKIN Rate Viewer v2.0 (directory mode)")
     print("=" * 70)
     PyInstaller.__main__.run(["--clean", "--noconfirm", SPEC_PATH])
 
